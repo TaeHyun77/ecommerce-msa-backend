@@ -13,7 +13,7 @@ x-app: &app
 x-app-env: &app-env
   JAVA_TOOL_OPTIONS: -Xmx256m -Duser.timezone=Asia/Seoul # 7개 서비스를 Docker 메모리 안에서 함께 띄우기 위해 힙 제한
 
-# DB를 쓰는 서비스에만 주입 - secret 파일이 없는 서비스(delivery)도 이 값으로 접속
+# DB를 쓰는 서비스에만 주입 - secret 파일 유무와 관계없이 컨테이너는 이 값으로 접속
 x-db-env: &db-env
   SPRING_DATASOURCE_USERNAME: root
   SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -92,6 +92,7 @@ services:
       MEMBER_SERVICE_URL: http://member-service:8082
       ORDER_SERVICE_URL: http://order-service:8083
       SEARCH_SERVICE_URL: http://search-service:8086
+      PROMOTION_SERVICE_URL: http://promotion-service:8087
       # 브라우저 요청이 Docker 네트워크 게이트웨이 IP로 들어오므로 사설 대역을 신뢰해야 X-Forwarded-*가 붙음 - 없으면 OAuth 콜백 주소가 member-service:8082로 만들어짐 (로컬 전용)
       GATEWAY_TRUSTED_PROXIES: 127[.]0[.]0[.]1|0:0:0:0:0:0:0:1|172[.](1[6-9]|2[0-9]|3[01])[.].*|192[.]168[.].*
 
@@ -154,16 +155,16 @@ services:
     depends_on:
       mysql: { condition: service_healthy }
 
-  delivery-service:
+  promotion-service:
     <<: *app
     build:
       <<: *app-build
-      args: { MODULE: delivery-service }
+      args: { MODULE: promotion-service }
     ports:
-      - "8085:8085"
+      - "8087:8087"
     environment:
       <<: [*app-env, *db-env]
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ecommerce_delivery?useUnicode=true&serverTimezone=Asia/Seoul
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ecommerce_promotion?useUnicode=true&serverTimezone=Asia/Seoul
     depends_on:
       mysql: { condition: service_healthy }
 
