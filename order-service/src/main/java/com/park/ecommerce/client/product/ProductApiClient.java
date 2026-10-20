@@ -1,10 +1,10 @@
-package com.park.ecommerce.product;
+package com.park.ecommerce.client.product;
 
 import com.park.ecommerce.exception.OrderErrorCode;
 import com.park.ecommerce.exception.OrderException;
 import com.park.ecommerce.exception.ProductServiceUnavailableException;
-import com.park.ecommerce.product.dto.ProductSummaryResponse;
-import com.park.ecommerce.product.dto.StockReservationRequest;
+import com.park.ecommerce.client.product.dto.ProductSummaryResponse;
+import com.park.ecommerce.client.product.dto.StockReservationRequest;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
@@ -16,8 +16,9 @@ import org.springframework.web.client.RestClient;
 import java.util.Collection;
 import java.util.List;
 
-@Component
 @RequiredArgsConstructor
+@CircuitBreaker(name = "productService")
+@Component
 public class ProductApiClient {
     private final RestClient productServiceRestClient;
 
@@ -25,7 +26,6 @@ public class ProductApiClient {
      * Circuit이 OPEN이면 실제 호출 없이 CallNotPermittedException 발생
      * → GlobalExceptionHandler에서 HTTP 503으로 변환
      */
-    @CircuitBreaker(name = "productService")
     public List<ProductSummaryResponse> findProducts(Collection<Long> productIds) {
         try {
             return productServiceRestClient.get()
@@ -41,7 +41,6 @@ public class ProductApiClient {
     }
 
     // 한 상품이라도 재고가 부족하면 product-service가 전체를 롤백하고 409로 응답한다
-    @CircuitBreaker(name = "productService")
     public void reserve(StockReservationRequest request) {
         try {
             productServiceRestClient.post()
@@ -59,7 +58,6 @@ public class ProductApiClient {
     }
 
     // PG 승인 직전에 호출 - 이미 확정된 선점은 product-service가 성공으로 응답하므로 복구 중 같은 확정을 다시 요청해도 true
-    @CircuitBreaker(name = "productService")
     public boolean confirmReservation(String orderNo) {
         try {
             return productServiceRestClient.post()
@@ -77,7 +75,6 @@ public class ProductApiClient {
     }
 
     // PG 승인이 거절되면 확정한 선점을 풀어 재고를 되돌린다 - 이미 해제된 선점도 성공으로 응답하므로 다시 요청해도 안전
-    @CircuitBreaker(name = "productService")
     public void releaseReservation(String orderNo) {
         try {
             productServiceRestClient.post()

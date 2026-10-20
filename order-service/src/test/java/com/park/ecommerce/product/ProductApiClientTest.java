@@ -1,10 +1,11 @@
 package com.park.ecommerce.product;
 
+import com.park.ecommerce.client.product.ProductApiClient;
 import com.park.ecommerce.config.RestClientConfig;
 import com.park.ecommerce.exception.OrderErrorCode;
 import com.park.ecommerce.exception.OrderException;
 import com.park.ecommerce.exception.ProductServiceUnavailableException;
-import com.park.ecommerce.product.dto.StockReservationRequest;
+import com.park.ecommerce.client.product.dto.StockReservationRequest;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

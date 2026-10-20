@@ -1,4 +1,4 @@
-package com.park.ecommerce.product.dto;
+package com.park.ecommerce.client.product.dto;
 
 // product-service의 응답 중 장바구니·주문에 필요한 필드만 직접 정의한 DTO
 // product-service 응답에 필드가 추가/변경되어도 여기서 쓰는 필드 이름만 유지되면 영향받지 않음

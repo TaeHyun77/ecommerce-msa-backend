@@ -1,7 +1,7 @@
 package com.park.ecommerce.cart.dto;
 
 import com.park.ecommerce.cart.CartItem;
-import com.park.ecommerce.product.dto.ProductSummaryResponse;
+import com.park.ecommerce.client.product.dto.ProductSummaryResponse;
 
 public record CartItemResponse(
         Long productId,

@@ -1,5 +1,6 @@
 package com.park.ecommerce.search;
 
+import com.park.ecommerce.client.product.ProductApiClient;
 import com.park.ecommerce.exception.SearchErrorCode;
 import com.park.ecommerce.exception.SearchException;
 import com.park.ecommerce.keyword.SearchKeywordService;
