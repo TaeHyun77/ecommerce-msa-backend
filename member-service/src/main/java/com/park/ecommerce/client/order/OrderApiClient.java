@@ -1,7 +1,7 @@
-package com.park.ecommerce.order;
+package com.park.ecommerce.client.order;
 
 import com.park.ecommerce.exception.OrderServiceUnavailableException;
-import com.park.ecommerce.order.dto.MemberOrderResponse;
+import com.park.ecommerce.client.order.dto.MemberOrderResponse;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
@@ -11,14 +11,14 @@ import org.springframework.web.client.RestClient;
 
 import java.util.List;
 
-@Component
 @RequiredArgsConstructor
+@CircuitBreaker(name = "orderService")
+@Component
 public class OrderApiClient {
     private final RestClient orderServiceRestClient;
 
     // Circuit이 OPEN이면 실제 호출 없이 CallNotPermittedException 발생
     // → GlobalExceptionHandler에서 HTTP 503으로 변환
-    @CircuitBreaker(name = "orderService")
     public List<MemberOrderResponse> findOrdersByMemberId(Long memberId) {
         try {
             return orderServiceRestClient.get()

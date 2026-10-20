@@ -2,8 +2,7 @@ package com.park.ecommerce.member;
 
 import com.park.ecommerce.auth.util.CookieUtils;
 import com.park.ecommerce.member.dto.MemberResponse;
-import com.park.ecommerce.order.MemberOrderService;
-import com.park.ecommerce.order.dto.MemberOrderResponse;
+import com.park.ecommerce.client.order.dto.MemberOrderResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +21,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class MemberController {
     private final MemberService memberService;
-    private final MemberOrderService memberOrderService;
 
     // 회원 정보 조회
     @GetMapping("/me")
@@ -33,7 +31,7 @@ public class MemberController {
     // 특정 회원의 주문 목록 조회
     @GetMapping("/me/orders")
     public List<MemberOrderResponse> getMyOrders(@AuthenticationPrincipal Long memberId) {
-        return memberOrderService.getMyOrders(memberId);
+        return memberService.getMyOrders(memberId);
     }
 
     @DeleteMapping("/me")

@@ -1,4 +1,4 @@
-package com.park.ecommerce.search;
+package com.park.ecommerce.client.product;
 
 import com.park.ecommerce.exception.ProductServiceUnavailableException;
 import com.park.ecommerce.search.dto.ProductSummaryResponse;
@@ -8,17 +8,16 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
-
 import java.util.Collection;
 import java.util.List;
 
-@Component
 @RequiredArgsConstructor
+@CircuitBreaker(name = "productService")
+@Component
 public class ProductApiClient {
     private final RestClient productServiceRestClient;
 
     // 등록되지 않은 상품 식별자는 응답에서 빠짐 - 서킷이 열려 있으면 호출 없이 CallNotPermittedException이 발생하여 503으로 응답
-    @CircuitBreaker(name = "productService")
     public List<ProductSummaryResponse> findProducts(Collection<Long> productIds) {
         try {
             return productServiceRestClient.get()

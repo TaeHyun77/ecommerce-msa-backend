@@ -1,4 +1,4 @@
-package com.park.ecommerce.order.dto;
+package com.park.ecommerce.client.order.dto;
 
 import java.time.LocalDateTime;
 

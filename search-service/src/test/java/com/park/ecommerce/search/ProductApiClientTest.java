@@ -1,5 +1,6 @@
 package com.park.ecommerce.search;
 
+import com.park.ecommerce.client.product.ProductApiClient;
 import com.park.ecommerce.config.RestClientConfig;
 import com.park.ecommerce.exception.ProductServiceUnavailableException;
 import com.park.ecommerce.exception.SearchErrorCode;

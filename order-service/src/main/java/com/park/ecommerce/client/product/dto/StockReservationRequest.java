@@ -1,4 +1,4 @@
-package com.park.ecommerce.product.dto;
+package com.park.ecommerce.client.product.dto;
 
 import com.park.ecommerce.order.domain.Order;
 

@@ -1,9 +1,10 @@
 package com.park.ecommerce.payment;
 
+import com.park.ecommerce.client.payment.PaymentApiClient;
 import com.park.ecommerce.config.RestClientConfig;
 import com.park.ecommerce.exception.PaymentResultUnknownException;
-import com.park.ecommerce.payment.dto.PaymentApproveRequest;
-import com.park.ecommerce.payment.dto.PaymentApproveResponse;
+import com.park.ecommerce.client.payment.dto.PaymentApproveRequest;
+import com.park.ecommerce.client.payment.dto.PaymentApproveResponse;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
