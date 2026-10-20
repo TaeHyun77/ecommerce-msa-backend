@@ -10,12 +10,14 @@ import com.park.ecommerce.product.ProductService;
 import com.park.ecommerce.product.dto.ProductCreateRequest;
 import com.park.ecommerce.product.status.StorageType;
 import com.park.ecommerce.reservation.domain.StockReservationRepository;
+import com.park.ecommerce.reservation.domain.StockReservationStatus;
 import com.park.ecommerce.reservation.dto.StockReservationRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -29,6 +31,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,6 +61,9 @@ class StockReservationConcurrencyTest {
 
     @Autowired
     private CategoryRepository categoryRepository;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @Test
     @DisplayName("재고보다 많은 선점이 동시에 들어와도 재고만큼만 성공하고 재고는 음수가 되지 않는다")
@@ -95,12 +101,47 @@ class StockReservationConcurrencyTest {
         assertThat(stockOf(productId)).isEqualTo(10);
     }
 
+    @Test
+    @DisplayName("확정과 만료 해제가 같은 선점에 동시에 실행되면 한쪽만 반영된다 - 만료 시각 경계에서 결제 승인과 만료 스케줄러가 겹친 경우")
+    void appliesOnlyOneWhenConfirmAndExpireRace() throws InterruptedException {
+        Long productId = productWithStock(100);
+
+        for (int i = 0; i < 50; i++) {
+            String orderNo = UUID.randomUUID().toString();
+            LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(10);
+            stockReservationService.reserve(new StockReservationRequest(
+                    orderNo, expiresAt, List.of(new StockReservationRequest.Item(productId, 1))
+            ));
+            Long reservationId = stockReservationRepository.findByOrderNo(orderNo).orElseThrow().getId();
+            AtomicInteger confirmed = new AtomicInteger();
+            AtomicInteger expired = new AtomicInteger();
+
+            // 두 쪽에 서로 다른 시각을 넘겨 시간 조건은 모두 참으로 만든다 - 행 잠금과 상태 조건만으로 승패가 갈리는지 확인하기 위해
+            List<Throwable> errors = runConcurrently(List.of(
+                    () -> confirmed.set(transactionTemplate.execute(status ->
+                            stockReservationRepository.confirm(orderNo, expiresAt.minusSeconds(1)))),
+                    () -> expired.set(transactionTemplate.execute(status ->
+                            stockReservationRepository.expire(reservationId, expiresAt.plusSeconds(1))))
+            ));
+
+            assertThat(errors).isEmpty();
+            assertThat(confirmed.get() + expired.get()).isEqualTo(1);
+            assertThat(statusOf(orderNo)).isEqualTo(confirmed.get() == 1
+                    ? StockReservationStatus.CONFIRMED
+                    : StockReservationStatus.RELEASED);
+        }
+    }
+
     private Long productWithStock(int stock) {
         Long productId = productService.register(new ProductCreateRequest(
                 "SKU-" + UUID.randomUUID(), "동시성 테스트 상품", null, null, StorageType.ROOM_TEMPERATURE, 1_000, null, subCategoryId()
         )).productId();
         productService.increaseStock(productId, stock);
         return productId;
+    }
+
+    private StockReservationStatus statusOf(String orderNo) {
+        return stockReservationRepository.findByOrderNo(orderNo).orElseThrow().getStatus();
     }
 
     private int stockOf(Long productId) {

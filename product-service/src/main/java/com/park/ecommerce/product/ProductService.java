@@ -48,7 +48,7 @@ public class ProductService {
         return ProductResponse.from(productRepository.save(request.toEntity()));
     }
 
-    // 행을 잠가 읽어 입고와 겹쳣을 떄 상태가 ~방지
+    // 행을 잠가 읽어 입고와 겹쳣을 때를 방지
     @Transactional
     public ProductResponse update(Long productId, ProductUpdateRequest request) {
         Product product = productRepository.findWithLockById(productId)
