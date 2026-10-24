@@ -7,10 +7,12 @@ import com.park.ecommerce.exception.ProductServiceUnavailableException;
 import com.park.ecommerce.order.domain.Order;
 import com.park.ecommerce.order.domain.OrderRepository;
 import com.park.ecommerce.order.domain.OrderStatus;
+import com.park.ecommerce.order.dto.OrderDetailResponse;
 import com.park.ecommerce.order.dto.OrderPaymentRequest;
 import com.park.ecommerce.order.dto.OrderPaymentResponse;
 import com.park.ecommerce.client.payment.PaymentApiClient;
 import com.park.ecommerce.client.payment.dto.PaymentApproveRequest;
+import com.park.ecommerce.client.payment.dto.PaymentResponse;
 import com.park.ecommerce.client.product.ProductApiClient;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +29,27 @@ public class OrderPaymentService {
     private final OrderService orderService;
     private final ProductApiClient productApiClient;
     private final PaymentApiClient paymentApiClient;
+
+    // 주문 상세 조회 - 결제 정보는 payment-service에서 가져옴
+    public OrderDetailResponse getOrder(Long memberId, String orderNo) {
+        OrderDetailResponse order = orderService.getOrder(memberId, orderNo);
+
+        // 결제가 확정된 주문(PAID, FAILED)만 결제 정보를 붙임 - 승인 중 주문은 폴링마다 payment-service를 호출하지 않도록 제외
+        // FAILED에는 결제 기록이 없는 주문(만료, 선점 실패)도 있지만 findPayment가 빈 값으로 처리
+        if (order.status() == OrderStatus.PAYMENT_WAITING || order.status() == OrderStatus.APPROVING) return order;
+
+        return order.withPayment(findPayment(orderNo));
+    }
+
+    // 결제 정보를 가져오지 못해도 주문 상태는 응답 - 클라이언트는 승인 중인 주문의 최종 상태를 주문 조회로 확인하므로 결제 정보 때문에 조회까지 실패하면 안 됨
+    private PaymentResponse findPayment(String orderNo) {
+        try {
+            return paymentApiClient.findPayment(orderNo).orElse(null);
+        } catch (PaymentResultUnknownException | CallNotPermittedException e) {
+            log.warn("[주문] 결제 정보 조회 실패로 결제 정보 없이 응답 orderNo={}, 사유={}", orderNo, e.getMessage());
+            return null;
+        }
+    }
 
     // 결제창 인증을 마친 주문의 승인 - 결과를 모르면 APPROVING을 돌려주고, 클라이언트는 주문 조회로 최종 결과를 확인한다
     public OrderPaymentResponse approve(Long memberId, String orderNo, OrderPaymentRequest request) {

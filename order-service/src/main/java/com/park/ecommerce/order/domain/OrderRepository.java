@@ -1,6 +1,7 @@
 package com.park.ecommerce.order.domain;
 
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -11,6 +12,10 @@ import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findAllByMemberIdOrderByOrderedAtDesc(Long memberId);
+
+    // 목록에서 품목까지 보여주므로 한 번에 함께 조회 - 주문마다 품목을 따로 조회하는 N+1을 막음
+    @EntityGraph(attributePaths = "lines")
+    List<Order> findAllWithLinesByMemberIdOrderByOrderedAtDesc(Long memberId);
 
     Optional<Order> findByOrderNo(String orderNo);
 

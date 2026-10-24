@@ -6,6 +6,7 @@ import com.park.ecommerce.order.domain.Order;
 import com.park.ecommerce.order.domain.OrderRepository;
 import com.park.ecommerce.order.dto.OrderDetailResponse;
 import com.park.ecommerce.order.dto.OrderResponse;
+import com.park.ecommerce.order.dto.OrderSummaryResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +24,13 @@ public class OrderService {
     public List<OrderResponse> getOrdersByMemberId(Long memberId) {
         return orderRepository.findAllByMemberIdOrderByOrderedAtDesc(memberId).stream()
                 .map(OrderResponse::from)
+                .toList();
+    }
+
+    // 내 주문 목록 조회 - 최근 주문부터
+    public List<OrderSummaryResponse> getOrderSummaries(Long memberId) {
+        return orderRepository.findAllWithLinesByMemberIdOrderByOrderedAtDesc(memberId).stream()
+                .map(OrderSummaryResponse::from)
                 .toList();
     }
 

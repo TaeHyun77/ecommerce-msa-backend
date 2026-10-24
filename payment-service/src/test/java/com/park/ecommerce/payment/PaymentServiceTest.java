@@ -7,6 +7,7 @@ import com.park.ecommerce.payment.domain.PaymentRepository;
 import com.park.ecommerce.payment.domain.PaymentStatus;
 import com.park.ecommerce.payment.dto.PaymentApproveRequest;
 import com.park.ecommerce.payment.dto.PaymentApproveResponse;
+import com.park.ecommerce.payment.dto.PaymentResponse;
 import com.park.ecommerce.toss.TossPaymentsClient;
 import com.park.ecommerce.toss.TossPaymentsException;
 import com.park.ecommerce.toss.dto.TossPaymentResponse;
@@ -192,6 +193,30 @@ class PaymentServiceTest {
 
         assertThat(paymentOf(orderNo).getPaymentKey()).isEqualTo(PAYMENT_KEY);
         verify(tossPaymentsClient, never()).confirm(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("결제 정보를 조회하면 상태·금액·결제 수단·승인 시각을 돌려준다")
+    void findsPayment() {
+        String orderNo = newOrderNo();
+        paymentRepository.save(completed(orderNo));
+
+        PaymentResponse response = paymentService.getPayment(orderNo);
+
+        assertThat(response.orderNo()).isEqualTo(orderNo);
+        assertThat(response.status()).isEqualTo(PaymentStatus.DONE);
+        assertThat(response.amount()).isEqualTo(AMOUNT);
+        assertThat(response.method()).isEqualTo("카드");
+        assertThat(response.approvedAt()).isEqualTo(APPROVED_AT.toLocalDateTime());
+    }
+
+    @Test
+    @DisplayName("결제 기록이 없는 주문의 결제 정보를 조회하면 404 예외를 던진다")
+    void throwsNotFoundWhenNoPayment() {
+        assertThatThrownBy(() -> paymentService.getPayment(newOrderNo()))
+                .isInstanceOf(PaymentException.class)
+                .extracting("errorCode")
+                .isEqualTo(PaymentErrorCode.PAYMENT_NOT_FOUND);
     }
 
     private void assertResultUnknown(String orderNo) {

@@ -3,16 +3,21 @@ package com.park.ecommerce.order;
 import com.park.ecommerce.exception.OrderErrorCode;
 import com.park.ecommerce.exception.OrderException;
 import com.park.ecommerce.exception.PaymentResultUnknownException;
+import com.park.ecommerce.exception.PaymentServiceUnavailableException;
 import com.park.ecommerce.exception.ProductServiceUnavailableException;
 import com.park.ecommerce.order.domain.Order;
 import com.park.ecommerce.order.domain.OrderRepository;
 import com.park.ecommerce.order.domain.OrderStatus;
+import com.park.ecommerce.order.dto.OrderDetailResponse;
 import com.park.ecommerce.order.dto.OrderPaymentRequest;
 import com.park.ecommerce.order.dto.OrderPaymentResponse;
 import com.park.ecommerce.client.payment.PaymentApiClient;
 import com.park.ecommerce.client.payment.dto.PaymentApproveRequest;
 import com.park.ecommerce.client.payment.dto.PaymentApproveResponse;
+import com.park.ecommerce.client.payment.dto.PaymentResponse;
 import com.park.ecommerce.client.product.ProductApiClient;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -29,6 +34,7 @@ import org.testcontainers.mysql.MySQLContainer;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -332,6 +338,90 @@ class OrderPaymentServiceTest {
                 .toList();
 
         assertThat(scheduledTasks).anyMatch(task -> task.endsWith("OrderApprovalRecoveryScheduler.recoverApprovals"));
+    }
+
+    @Test
+    @DisplayName("결제 대기 주문을 조회하면 결제 기록이 없으므로 payment-service를 호출하지 않는다")
+    void skipsPaymentLookupForPaymentWaitingOrder() {
+        String orderNo = paymentWaitingOrder();
+
+        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+
+        assertThat(response.payment()).isNull();
+        verify(paymentApiClient, never()).findPayment(anyString());
+    }
+
+    @Test
+    @DisplayName("승인 중 주문을 조회하면 결제가 확정되지 않았으므로 payment-service를 호출하지 않는다 - 폴링마다 호출하지 않도록")
+    void skipsPaymentLookupForApprovingOrder() {
+        String orderNo = staleApprovingOrder();
+
+        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
+        assertThat(response.payment()).isNull();
+        verify(paymentApiClient, never()).findPayment(anyString());
+    }
+
+    @Test
+    @DisplayName("결제된 주문을 조회하면 payment-service의 결제 정보를 함께 돌려준다")
+    void attachesPaymentToPaidOrder() {
+        String orderNo = paymentWaitingOrder();
+        changeStatus(orderNo, "PAID", LocalDateTime.now());
+        LocalDateTime approvedAt = LocalDateTime.of(2026, 9, 22, 12, 5);
+        given(paymentApiClient.findPayment(orderNo)).willReturn(Optional.of(new PaymentResponse("DONE", AMOUNT, "카드", approvedAt)));
+
+        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.PAID);
+        assertThat(response.payment()).isEqualTo(new OrderDetailResponse.Payment("DONE", AMOUNT, "카드", approvedAt));
+    }
+
+    @Test
+    @DisplayName("결제 거절로 실패한 주문은 결제 실패 정보를 함께 돌려준다")
+    void attachesPaymentToFailedOrder() {
+        String orderNo = paymentWaitingOrder();
+        changeStatus(orderNo, "FAILED", LocalDateTime.now());
+        given(paymentApiClient.findPayment(orderNo)).willReturn(Optional.of(new PaymentResponse("FAILED", AMOUNT, null, null)));
+
+        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.FAILED);
+        assertThat(response.payment()).isEqualTo(new OrderDetailResponse.Payment("FAILED", AMOUNT, null, null));
+    }
+
+    @Test
+    @DisplayName("결제 기록이 없는 실패 주문은 결제 정보 없이 돌려준다")
+    void returnsFailedOrderWithoutPaymentWhenNoRecord() {
+        String orderNo = paymentWaitingOrder();
+        changeStatus(orderNo, "FAILED", null);
+        given(paymentApiClient.findPayment(orderNo)).willReturn(Optional.empty());
+
+        assertThat(orderPaymentService.getOrder(MEMBER_ID, orderNo).payment()).isNull();
+    }
+
+    @Test
+    @DisplayName("payment-service 장애로 결제 정보를 가져오지 못해도 주문 상태는 응답한다 - 폴링이 최종 상태(PAID)를 이 조회로 확인하므로")
+    void respondsWithoutPaymentWhenPaymentServiceFails() {
+        String orderNo = paymentWaitingOrder();
+        changeStatus(orderNo, "PAID", LocalDateTime.now());
+        given(paymentApiClient.findPayment(orderNo)).willThrow(new PaymentServiceUnavailableException("연결 실패"));
+
+        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+
+        assertThat(response.status()).isEqualTo(OrderStatus.PAID);
+        assertThat(response.payment()).isNull();
+    }
+
+    @Test
+    @DisplayName("서킷이 열려 호출이 차단돼도 주문 상태는 응답한다")
+    void respondsWithoutPaymentWhenCircuitOpen() {
+        String orderNo = paymentWaitingOrder();
+        changeStatus(orderNo, "PAID", LocalDateTime.now());
+        given(paymentApiClient.findPayment(orderNo))
+                .willThrow(CallNotPermittedException.createCallNotPermittedException(CircuitBreaker.ofDefaults("paymentService")));
+
+        assertThat(orderPaymentService.getOrder(MEMBER_ID, orderNo).payment()).isNull();
     }
 
     private void assertRejected(String orderNo, OrderPaymentRequest request, OrderErrorCode errorCode) {

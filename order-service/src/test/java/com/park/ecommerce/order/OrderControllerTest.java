@@ -8,6 +8,7 @@ import com.park.ecommerce.order.dto.OrderCreateResponse;
 import com.park.ecommerce.order.dto.OrderDetailResponse;
 import com.park.ecommerce.order.dto.OrderPaymentRequest;
 import com.park.ecommerce.order.dto.OrderPaymentResponse;
+import com.park.ecommerce.order.dto.OrderSummaryResponse;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -100,21 +101,56 @@ class OrderControllerTest {
     @Test
     @DisplayName("주문을 조회하면 200과 주문 상태·품목을 응답한다")
     void getsOrder() throws Exception {
-        given(orderService.getOrder(1L, "ORDER-0001")).willReturn(new OrderDetailResponse(
+        given(orderPaymentService.getOrder(1L, "ORDER-0001")).willReturn(new OrderDetailResponse(
                 "ORDER-0001", OrderStatus.PAYMENT_WAITING, "유기농 우유 900ml", 7_800, EXPIRES_AT.minusMinutes(10), EXPIRES_AT,
-                List.of(new OrderDetailResponse.Line(1L, "유기농 우유 900ml", 3_900, 2))
+                List.of(new OrderDetailResponse.Line(1L, "유기농 우유 900ml", 3_900, 2)), null
         ));
 
         mockMvc.perform(get("/api/orders/ORDER-0001").header(MEMBER_ID_HEADER, 1L))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PAYMENT_WAITING"))
-                .andExpect(jsonPath("$.lines[0].productName").value("유기농 우유 900ml"));
+                .andExpect(jsonPath("$.lines[0].productName").value("유기농 우유 900ml"))
+                .andExpect(jsonPath("$.payment").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("결제된 주문을 조회하면 결제 정보도 응답한다")
+    void getsPaidOrderWithPayment() throws Exception {
+        given(orderPaymentService.getOrder(1L, "ORDER-0001")).willReturn(new OrderDetailResponse(
+                "ORDER-0001", OrderStatus.PAID, "유기농 우유 900ml", 7_800, EXPIRES_AT.minusMinutes(10), EXPIRES_AT,
+                List.of(new OrderDetailResponse.Line(1L, "유기농 우유 900ml", 3_900, 2)),
+                new OrderDetailResponse.Payment("DONE", 7_800, "카드", EXPIRES_AT.minusMinutes(5))
+        ));
+
+        mockMvc.perform(get("/api/orders/ORDER-0001").header(MEMBER_ID_HEADER, 1L))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.payment.status").value("DONE"))
+                .andExpect(jsonPath("$.payment.amount").value(7_800))
+                .andExpect(jsonPath("$.payment.method").value("카드"))
+                .andExpect(jsonPath("$.payment.approvedAt").value("2026-09-22T12:05:00"));
+    }
+
+    @Test
+    @DisplayName("주문 목록을 조회하면 200과 주문번호·주문일·상품 정보를 응답한다")
+    void getsOrders() throws Exception {
+        given(orderService.getOrderSummaries(1L)).willReturn(List.of(new OrderSummaryResponse(
+                "ORDER-0001", EXPIRES_AT.minusMinutes(10),
+                List.of(new OrderDetailResponse.Line(1L, "유기농 우유 900ml", 3_900, 2))
+        )));
+
+        mockMvc.perform(get("/api/orders").header(MEMBER_ID_HEADER, 1L))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].orderNo").value("ORDER-0001"))
+                .andExpect(jsonPath("$[0].orderedAt").value("2026-09-22T12:00:00"))
+                .andExpect(jsonPath("$[0].lines[0].productName").value("유기농 우유 900ml"))
+                .andExpect(jsonPath("$[0].lines[0].quantity").value(2))
+                .andExpect(jsonPath("$[0].status").doesNotExist());
     }
 
     @Test
     @DisplayName("본인 주문이 아니거나 없는 주문을 조회하면 404를 응답한다")
     void respondsNotFoundForOthersOrder() throws Exception {
-        given(orderService.getOrder(1L, "ORDER-0001")).willThrow(new OrderException(OrderErrorCode.ORDER_NOT_FOUND));
+        given(orderPaymentService.getOrder(1L, "ORDER-0001")).willThrow(new OrderException(OrderErrorCode.ORDER_NOT_FOUND));
 
         mockMvc.perform(get("/api/orders/ORDER-0001").header(MEMBER_ID_HEADER, 1L))
                 .andExpect(status().isNotFound())

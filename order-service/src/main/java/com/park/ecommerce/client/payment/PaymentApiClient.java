@@ -3,11 +3,16 @@ package com.park.ecommerce.client.payment;
 import com.park.ecommerce.exception.PaymentServiceUnavailableException;
 import com.park.ecommerce.client.payment.dto.PaymentApproveRequest;
 import com.park.ecommerce.client.payment.dto.PaymentApproveResponse;
+import com.park.ecommerce.client.payment.dto.PaymentResponse;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+
+import java.util.Optional;
 
 @RequiredArgsConstructor
 @CircuitBreaker(name = "paymentService")
@@ -27,6 +32,25 @@ public class PaymentApiClient {
                     .body(PaymentApproveResponse.class);
         } catch (ResourceAccessException e) {
             // 타임아웃, 연결 실패 - payment-service가 승인을 처리했는지 알 수 없음
+            throw new PaymentServiceUnavailableException("payment-service 호출 실패: " + e.getMessage());
+        }
+    }
+
+    // 결제 정보 조회 - 승인을 요청하기 전의 주문은 결제 기록이 없으므로 404를 빈 값으로 돌려줌
+    public Optional<PaymentResponse> findPayment(String orderNo) {
+        try {
+            ResponseEntity<PaymentResponse> response = paymentServiceRestClient.get()
+                    .uri("/internal/payments/{orderNo}", orderNo)
+                    .retrieve()
+                    .onStatus(status -> status == HttpStatus.NOT_FOUND, (request, res) -> {
+                    })
+                    .toEntity(PaymentResponse.class);
+
+            if (response.getStatusCode() == HttpStatus.NOT_FOUND) {
+                return Optional.empty();
+            }
+            return Optional.ofNullable(response.getBody());
+        } catch (ResourceAccessException e) {
             throw new PaymentServiceUnavailableException("payment-service 호출 실패: " + e.getMessage());
         }
     }

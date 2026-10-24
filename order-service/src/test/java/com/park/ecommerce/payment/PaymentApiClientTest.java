@@ -3,8 +3,10 @@ package com.park.ecommerce.payment;
 import com.park.ecommerce.client.payment.PaymentApiClient;
 import com.park.ecommerce.config.RestClientConfig;
 import com.park.ecommerce.exception.PaymentResultUnknownException;
+import com.park.ecommerce.exception.PaymentServiceUnavailableException;
 import com.park.ecommerce.client.payment.dto.PaymentApproveRequest;
 import com.park.ecommerce.client.payment.dto.PaymentApproveResponse;
+import com.park.ecommerce.client.payment.dto.PaymentResponse;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +18,8 @@ import tools.jackson.databind.json.JsonMapper;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -127,5 +131,39 @@ class PaymentApiClientTest {
 
         assertThatThrownBy(() -> paymentApiClient.approve(REQUEST))
                 .isInstanceOf(PaymentResultUnknownException.class);
+    }
+
+    @Test
+    @DisplayName("결제 정보를 조회하면 주문번호로 조회하고 상태·금액·결제 수단·승인 시각을 읽는다")
+    void findsPayment() {
+        responseStatus = 200;
+        responseBody = """
+                { "orderNo": "ORDER-0001", "status": "DONE", "amount": 7800, "method": "카드", "approvedAt": "2026-09-22T12:00:05" }
+                """;
+
+        Optional<PaymentResponse> payment = paymentApiClient.findPayment("ORDER-0001");
+
+        assertThat(receivedRequest).isEqualTo("GET /internal/payments/ORDER-0001");
+        assertThat(payment).contains(new PaymentResponse("DONE", 7_800, "카드", LocalDateTime.of(2026, 9, 22, 12, 0, 5)));
+    }
+
+    @Test
+    @DisplayName("결제 기록이 없어 404가 오면 예외 없이 빈 값을 돌려준다")
+    void returnsEmptyWhenNoPayment() {
+        responseStatus = 404;
+        responseBody = """
+                { "code": "PAYMENT_NOT_FOUND", "message": "결제 정보를 찾을 수 없습니다." }
+                """;
+
+        assertThat(paymentApiClient.findPayment("ORDER-0001")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("결제 정보를 조회할 때 payment-service가 5xx로 응답하면 장애 예외를 던진다")
+    void throwsUnavailableOnServerErrorWhenFindingPayment() {
+        responseStatus = 500;
+
+        assertThatThrownBy(() -> paymentApiClient.findPayment("ORDER-0001"))
+                .isInstanceOf(PaymentServiceUnavailableException.class);
     }
 }

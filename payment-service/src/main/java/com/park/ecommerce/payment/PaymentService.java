@@ -6,6 +6,7 @@ import com.park.ecommerce.payment.domain.Payment;
 import com.park.ecommerce.payment.domain.PaymentRepository;
 import com.park.ecommerce.payment.dto.PaymentApproveRequest;
 import com.park.ecommerce.payment.dto.PaymentApproveResponse;
+import com.park.ecommerce.payment.dto.PaymentResponse;
 import com.park.ecommerce.toss.TossPaymentsClient;
 import com.park.ecommerce.toss.TossPaymentsException;
 import com.park.ecommerce.toss.dto.TossPaymentResponse;
@@ -51,6 +52,14 @@ public class PaymentService {
         paymentRepository.save(payment);
         log.info("[결제] 승인 결과 확정 orderNo={}, 상태={}", payment.getOrderNo(), payment.getStatus());
         return PaymentApproveResponse.from(payment);
+    }
+
+    // 결제 정보 조회
+    public PaymentResponse getPayment(String orderNo) {
+        Payment payment = paymentRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new PaymentException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+
+        return PaymentResponse.from(payment);
     }
 
     // 승인 요청이 실패했을 때 토스에 결제 상태를 조회해 결과를 확정
