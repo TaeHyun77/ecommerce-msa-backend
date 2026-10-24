@@ -37,7 +37,7 @@ import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
-// 주문 저장과 취소가 원격 호출과 분리된 트랜잭션으로 반영되는지는 실제 DB로 확인하고, 외부 서비스인 product-service만 대체한다
+// 주문 저장과 실패 처리가 원격 호출과 분리된 트랜잭션으로 반영되는지는 실제 DB로 확인하고, 외부 서비스인 product-service만 대체한다
 @Testcontainers
 @SpringBootTest(properties = {
         "order.payment-waiting.ttl=10m",
@@ -98,8 +98,8 @@ class OrderPlacementServiceTest {
     }
 
     @Test
-    @DisplayName("재고 선점에 실패하면 주문을 취소하고 예외를 그대로 던진다 - 결과를 모르는 장애도 취소")
-    void cancelsOrderWhenReservationFails() {
+    @DisplayName("재고 선점에 실패하면 주문을 실패 처리하고 예외를 그대로 던진다 - 결과를 모르는 장애도 실패 처리")
+    void failsOrderWhenReservationFails() {
         Long memberId = newMemberId();
         givenProducts(onSale(1L, "유기농 우유 900ml", 3_900, 10));
         willThrow(new ProductServiceUnavailableException()).given(productApiClient).reserve(any());
@@ -110,7 +110,7 @@ class OrderPlacementServiceTest {
         assertThat(orderRepository.findAllByMemberIdOrderByOrderedAtDesc(memberId))
                 .singleElement()
                 .extracting(Order::getStatus)
-                .isEqualTo(OrderStatus.CANCELLED);
+                .isEqualTo(OrderStatus.FAILED);
     }
 
     @Test
@@ -132,7 +132,7 @@ class OrderPlacementServiceTest {
     }
 
     @Test
-    @DisplayName("재고가 명백히 부족하면 취소 주문을 남기지 않도록 주문을 저장하지 않는다")
+    @DisplayName("재고가 명백히 부족하면 실패 주문을 남기지 않도록 주문을 저장하지 않는다")
     void rejectsObviouslyInsufficientStock() {
         Long memberId = newMemberId();
         givenProducts(onSale(1L, "유기농 우유 900ml", 3_900, 1));

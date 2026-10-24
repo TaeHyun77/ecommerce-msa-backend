@@ -36,8 +36,8 @@ public class OrderService {
     }
 
     @Transactional
-    public void cancel(String orderNo) {
-        orderRepository.cancelPaymentWaiting(orderNo);
+    public void fail(String orderNo) {
+        orderRepository.failPaymentWaiting(orderNo);
     }
 
     // 승인 중으로 바꾼 뒤 바로 커밋해, 이후 원격 호출 중에 서버가 멈춰도 복구 스케줄러가 이 주문을 찾을 수 있도록 한다
@@ -46,18 +46,29 @@ public class OrderService {
         return orderRepository.startApproval(orderNo, paymentKey, LocalDateTime.now()) == 1;
     }
 
+    // 승인 요청이 이미 끝난 뒤 호출하므로 진행 중인 요청과 겹치지 않아 바로 복구 대상으로 삼아도 됨
+    @Transactional
+    public void markApprovalUnknown(String orderNo) {
+        orderRepository.markApprovalUnknown(orderNo, LocalDateTime.now());
+    }
+
+    @Transactional
+    public void clearApprovalUnknown(String orderNo) {
+        orderRepository.clearApprovalUnknown(orderNo);
+    }
+
     @Transactional
     public void markPaid(String orderNo) {
         orderRepository.markPaid(orderNo);
     }
 
     @Transactional
-    public void cancelApproving(String orderNo) {
-        orderRepository.cancelApproving(orderNo);
+    public void failApproving(String orderNo) {
+        orderRepository.failApproving(orderNo);
     }
 
     @Transactional
-    public int cancelExpiredOrders() {
-        return orderRepository.cancelExpired(LocalDateTime.now());
+    public int failExpiredOrders() {
+        return orderRepository.failExpired(LocalDateTime.now());
     }
 }

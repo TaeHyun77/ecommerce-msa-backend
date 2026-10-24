@@ -79,7 +79,7 @@ public class OrderPlacementService {
             if (product == null) throw new OrderException(OrderErrorCode.PRODUCT_NOT_FOUND);
             if (!product.isOnSale()) throw new OrderException(OrderErrorCode.PRODUCT_NOT_ON_SALE);
 
-            // 재고는 선점에서 다시 확인하지만, 명백히 부족한 주문은 취소 이력을 남기지 않도록 저장 전에 확인
+            // 재고는 선점에서 다시 확인하지만, 명백히 부족한 주문은 실패 이력을 남기지 않도록 저장 전에 확인
             if (!product.canCover(item.quantity())) throw new OrderException(OrderErrorCode.INSUFFICIENT_STOCK);
         }
         return products;
@@ -90,10 +90,10 @@ public class OrderPlacementService {
         try {
             productApiClient.reserve(StockReservationRequest.from(order));
         } catch (RuntimeException e) {
-            // 선점하지 못한 주문은 결제로 이어질 수 없으므로 바로 취소
+            // 선점하지 못한 주문은 결제로 이어질 수 없으므로 바로 실패 처리
             // 타임아웃처럼 실제로는 선점됐을 수 있는 경우에도, 그 선점은 결제 기한에 product-service가 해제해 재고가 복구됨
-            orderService.cancel(order.getOrderNo());
-            log.warn("[주문] 재고 선점 실패로 주문 취소 orderNo={}, 사유={}", order.getOrderNo(), e.getMessage());
+            orderService.fail(order.getOrderNo());
+            log.warn("[주문] 재고 선점 실패로 주문 실패 처리 orderNo={}, 사유={}", order.getOrderNo(), e.getMessage());
             throw e;
         }
     }

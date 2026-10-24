@@ -45,25 +45,25 @@ class OrderTransitionConcurrencyTest {
     private TransactionTemplate transactionTemplate;
 
     @Test
-    @DisplayName("승인 시작과 결제 기한 만료 취소가 같은 주문에 동시에 실행되면 한쪽만 반영된다 - 결제 기한 경계에서 승인 요청과 만료 스케줄러가 겹친 경우")
-    void appliesOnlyOneWhenStartApprovalAndCancelExpiredRace() throws InterruptedException {
+    @DisplayName("승인 시작과 결제 기한 만료 처리가 같은 주문에 동시에 실행되면 한쪽만 반영된다 - 결제 기한 경계에서 승인 요청과 만료 스케줄러가 겹친 경우")
+    void appliesOnlyOneWhenStartApprovalAndFailExpiredRace() throws InterruptedException {
         for (int i = 0; i < 50; i++) {
             LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(10);
             String orderNo = paymentWaitingOrder(expiresAt);
             AtomicInteger started = new AtomicInteger();
-            AtomicInteger cancelled = new AtomicInteger();
+            AtomicInteger failed = new AtomicInteger();
 
             // 두 쪽에 서로 다른 시각을 넘겨 시간 조건은 모두 참으로 만든다 - 행 잠금과 상태 조건만으로 승패가 갈리는지 확인하기 위해
             List<Throwable> errors = runConcurrently(List.of(
                     () -> started.set(transactionTemplate.execute(status ->
                             orderRepository.startApproval(orderNo, PAYMENT_KEY, expiresAt.minusSeconds(1)))),
-                    () -> cancelled.set(transactionTemplate.execute(status ->
-                            orderRepository.cancelExpired(expiresAt.plusSeconds(1))))
+                    () -> failed.set(transactionTemplate.execute(status ->
+                            orderRepository.failExpired(expiresAt.plusSeconds(1))))
             ));
 
             assertThat(errors).isEmpty();
-            assertThat(started.get() + cancelled.get()).isEqualTo(1);
-            assertThat(statusOf(orderNo)).isEqualTo(started.get() == 1 ? OrderStatus.APPROVING : OrderStatus.CANCELLED);
+            assertThat(started.get() + failed.get()).isEqualTo(1);
+            assertThat(statusOf(orderNo)).isEqualTo(started.get() == 1 ? OrderStatus.APPROVING : OrderStatus.FAILED);
         }
     }
 

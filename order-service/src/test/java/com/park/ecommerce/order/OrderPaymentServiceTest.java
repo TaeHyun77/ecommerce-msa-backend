@@ -46,6 +46,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 @SpringBootTest(properties = {
         "order.payment-waiting.ttl=10m",
         "order.approval-recovery.stale-after=2m",
+        "order.approval-recovery.give-up-after=15m",
         // 테스트 중 스케줄러 개입 방지 - 복구 스케줄러는 테스트에서 직접 호출
         "order.payment-waiting.expire-poll-delay=1h",
         "order.approval-recovery.poll-delay=1h"
@@ -97,19 +98,19 @@ class OrderPaymentServiceTest {
     }
 
     @Test
-    @DisplayName("선점이 만료돼 확정하지 못하면 결제를 요청하지 않고 주문을 취소한다 - 청구 전에 차단")
-    void cancelsWithoutPaymentWhenReservationExpired() {
+    @DisplayName("선점이 만료돼 확정하지 못하면 결제를 요청하지 않고 주문을 실패 처리한다 - 청구 전에 차단")
+    void failsWithoutPaymentWhenReservationExpired() {
         String orderNo = paymentWaitingOrder();
         given(productApiClient.confirmReservation(orderNo)).willReturn(false);
 
         assertRejected(orderNo, request(AMOUNT), OrderErrorCode.ORDER_EXPIRED);
 
-        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.FAILED);
         verify(paymentApiClient, never()).approve(any());
     }
 
     @Test
-    @DisplayName("결제가 거절되면 확정한 선점을 해제하고 주문을 취소한다")
+    @DisplayName("결제가 거절되면 확정한 선점을 해제하고 주문을 실패 처리한다")
     void releasesReservationWhenPaymentFailed() {
         String orderNo = paymentWaitingOrder();
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
@@ -117,7 +118,7 @@ class OrderPaymentServiceTest {
 
         assertRejected(orderNo, request(AMOUNT), OrderErrorCode.PAYMENT_FAILED);
 
-        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.FAILED);
         verify(productApiClient).releaseReservation(orderNo);
     }
 
@@ -132,6 +133,7 @@ class OrderPaymentServiceTest {
 
         assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
+        assertThat(approvalUnknownAtOf(orderNo)).isNotNull();
         verify(productApiClient, never()).releaseReservation(anyString());
     }
 
@@ -149,7 +151,7 @@ class OrderPaymentServiceTest {
     }
 
     @Test
-    @DisplayName("결제 거절 뒤 선점 해제에 실패하면 취소하지 않고 승인 중으로 남긴다 - 복구에서 다시 해제")
+    @DisplayName("결제 거절 뒤 선점 해제에 실패하면 실패 처리하지 않고 승인 중으로 남긴다 - 복구에서 다시 해제")
     void staysApprovingWhenReleaseFails() {
         String orderNo = paymentWaitingOrder();
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
@@ -174,7 +176,7 @@ class OrderPaymentServiceTest {
     }
 
     @Test
-    @DisplayName("결제 기한이 지난 주문은 만료 취소 전이어도 승인하지 않는다")
+    @DisplayName("결제 기한이 지난 주문은 만료 처리 전이어도 승인하지 않는다")
     void rejectsOrderPastExpiresAt() {
         String orderNo = savedOrder(LocalDateTime.now().minusSeconds(1));
 
@@ -207,10 +209,10 @@ class OrderPaymentServiceTest {
     }
 
     @Test
-    @DisplayName("취소된 주문은 결제할 수 없다")
-    void rejectsCancelledOrder() {
+    @DisplayName("실패한 주문은 결제할 수 없다")
+    void rejectsFailedOrder() {
         String orderNo = paymentWaitingOrder();
-        changeStatus(orderNo, "CANCELLED", null);
+        changeStatus(orderNo, "FAILED", null);
 
         assertRejected(orderNo, request(AMOUNT), OrderErrorCode.ORDER_NOT_PAYABLE);
     }
@@ -233,21 +235,21 @@ class OrderPaymentServiceTest {
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
         given(paymentApiClient.approve(new PaymentApproveRequest(orderNo, PAYMENT_KEY, AMOUNT))).willReturn(done(orderNo));
 
-        orderApprovalRecoveryScheduler.recoverStaleApprovals();
+        orderApprovalRecoveryScheduler.recoverApprovals();
 
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.PAID);
     }
 
     @Test
-    @DisplayName("복구 중 결제 거절이 확정되면 선점을 해제하고 주문을 취소한다")
-    void recoversStaleApprovingOrderToCancelled() {
+    @DisplayName("복구 중 결제 거절이 확정되면 선점을 해제하고 주문을 실패 처리한다")
+    void recoversStaleApprovingOrderToFailed() {
         String orderNo = staleApprovingOrder();
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
         given(paymentApiClient.approve(any())).willReturn(failed(orderNo));
 
-        orderApprovalRecoveryScheduler.recoverStaleApprovals();
+        orderApprovalRecoveryScheduler.recoverApprovals();
 
-        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.FAILED);
         verify(productApiClient).releaseReservation(orderNo);
     }
 
@@ -257,10 +259,68 @@ class OrderPaymentServiceTest {
         String orderNo = paymentWaitingOrder();
         changeStatus(orderNo, "APPROVING", LocalDateTime.now());
 
-        orderApprovalRecoveryScheduler.recoverStaleApprovals();
+        orderApprovalRecoveryScheduler.recoverApprovals();
 
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
         verify(productApiClient, never()).confirmReservation(orderNo);
+    }
+
+    @Test
+    @DisplayName("결과 불명으로 표시된 주문은 승인을 시작한 지 얼마 안 됐어도 바로 복구한다 - 요청이 이미 끝나 겹치지 않음")
+    void recoversMarkedOrderWithoutWaitingStaleAfter() {
+        String orderNo = unknownMarkedOrder(LocalDateTime.now().minusSeconds(30));
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willReturn(done(orderNo));
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("복구 중에도 결과를 모르면 승인 중으로 남기고 다음 주기에 다시 복구한다")
+    void keepsMarkWhenRecoveryStillUnknown() {
+        String orderNo = unknownMarkedOrder(LocalDateTime.now().minusSeconds(30));
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willThrow(new PaymentResultUnknownException("payment-service 응답 status=503"));
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
+        assertThat(approvalUnknownAtOf(orderNo)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("승인 시작 후 재시도 상한이 지난 주문은 더 이상 복구하지 않고 승인 중으로 둔다 - 수동 확인 대상")
+    void stopsRetryingAfterGiveUpAfter() {
+        String orderNo = unknownMarkedOrder(LocalDateTime.now().minusMinutes(16));
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
+        verifyNoInteractions(productApiClient, paymentApiClient);
+    }
+
+    @Test
+    @DisplayName("상한이 지난 주문은 표시가 없어도 오래 멈춘 주문으로 다시 복구하지 않는다")
+    void doesNotRetryStaleOrderPastGiveUpAfter() {
+        String orderNo = paymentWaitingOrder();
+        changeStatus(orderNo, "APPROVING", LocalDateTime.now().minusMinutes(16));
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
+        verifyNoInteractions(productApiClient, paymentApiClient);
+    }
+
+    @Test
+    @DisplayName("상한이 지난 주문은 표시를 해제해 한 번만 알린다 - 매 주기마다 같은 오류 로그가 쌓이지 않도록")
+    void clearsMarkAfterGivingUp() {
+        String orderNo = unknownMarkedOrder(LocalDateTime.now().minusMinutes(16));
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(approvalUnknownAtOf(orderNo)).isNull();
     }
 
     @Test
@@ -271,7 +331,7 @@ class OrderPaymentServiceTest {
                 .map(task -> task.getTask().toString())
                 .toList();
 
-        assertThat(scheduledTasks).anyMatch(task -> task.endsWith("OrderApprovalRecoveryScheduler.recoverStaleApprovals"));
+        assertThat(scheduledTasks).anyMatch(task -> task.endsWith("OrderApprovalRecoveryScheduler.recoverApprovals"));
     }
 
     private void assertRejected(String orderNo, OrderPaymentRequest request, OrderErrorCode errorCode) {
@@ -292,6 +352,14 @@ class OrderPaymentServiceTest {
         return orderNo;
     }
 
+    // 결과 불명이 확정되어 바로 재시도할 수 있는 승인 중 주문
+    private String unknownMarkedOrder(LocalDateTime approvalRequestedAt) {
+        String orderNo = paymentWaitingOrder();
+        changeStatus(orderNo, "APPROVING", approvalRequestedAt);
+        jdbcTemplate.update("update orders set approval_unknown_at = ? where order_no = ?", LocalDateTime.now(), orderNo);
+        return orderNo;
+    }
+
     private String savedOrder(LocalDateTime expiresAt) {
         Order order = Order.builder()
                 .memberId(MEMBER_ID)
@@ -307,6 +375,10 @@ class OrderPaymentServiceTest {
     private void changeStatus(String orderNo, String status, LocalDateTime approvalRequestedAt) {
         jdbcTemplate.update("update orders set status = ?, payment_key = ?, approval_requested_at = ? where order_no = ?",
                 status, PAYMENT_KEY, approvalRequestedAt, orderNo);
+    }
+
+    private LocalDateTime approvalUnknownAtOf(String orderNo) {
+        return jdbcTemplate.queryForObject("select approval_unknown_at from orders where order_no = ?", LocalDateTime.class, orderNo);
     }
 
     private OrderStatus statusOf(String orderNo) {

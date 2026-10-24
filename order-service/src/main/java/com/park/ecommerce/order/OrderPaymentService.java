@@ -60,7 +60,7 @@ public class OrderPaymentService {
 
         return switch (proceedApproval(orderNo, order.getPaymentKey(), order.getTotalAmount())) {
             case PAID -> OrderStatus.PAID;
-            case RESERVATION_EXPIRED, PAYMENT_FAILED -> OrderStatus.CANCELLED;
+            case RESERVATION_EXPIRED, PAYMENT_FAILED -> OrderStatus.FAILED;
             case UNKNOWN -> OrderStatus.APPROVING;
         };
     }
@@ -69,8 +69,8 @@ public class OrderPaymentService {
         try {
             // PG 승인 전에 선점을 확정한다 - 선점이 만료된 주문은 청구 전에 막고, 확정된 선점은 더 이상 만료되지 않는다
             if (!productApiClient.confirmReservation(orderNo)) {
-                orderService.cancelApproving(orderNo);
-                log.info("[결제] 재고 선점 만료로 주문 취소 orderNo={}", orderNo);
+                orderService.failApproving(orderNo);
+                log.info("[결제] 재고 선점 만료로 주문 실패 처리 orderNo={}", orderNo);
                 return ApprovalOutcome.RESERVATION_EXPIRED;
             }
 
@@ -80,14 +80,15 @@ public class OrderPaymentService {
                 return ApprovalOutcome.PAID;
             }
 
-            // 승인이 거절되면 확정한 선점을 해제해 재고를 되돌린 뒤 취소한다 - 해제에 실패하면 승인 중으로 남아 복구에서 다시 해제
+            // 승인이 거절되면 확정한 선점을 해제해 재고를 되돌린 뒤 실패 처리한다 - 해제에 실패하면 승인 중으로 남아 복구에서 다시 해제
             productApiClient.releaseReservation(orderNo);
-            orderService.cancelApproving(orderNo);
-            log.info("[결제] 결제 거절로 선점 해제 후 주문 취소 orderNo={}", orderNo);
+            orderService.failApproving(orderNo);
+            log.info("[결제] 결제 거절로 선점 해제 후 주문 실패 처리 orderNo={}", orderNo);
             return ApprovalOutcome.PAYMENT_FAILED;
         } catch (ProductServiceUnavailableException | CallNotPermittedException | PaymentResultUnknownException e) {
             // 원격 호출의 결과를 모르는 경우 - 승인 중으로 남겨 두면 복구 스케줄러가 같은 흐름을 다시 실행한다
             log.warn("[결제] 결과 불명으로 승인 중 유지 orderNo={}, 사유={}", orderNo, e.getMessage());
+            orderService.markApprovalUnknown(orderNo);
             return ApprovalOutcome.UNKNOWN;
         }
     }

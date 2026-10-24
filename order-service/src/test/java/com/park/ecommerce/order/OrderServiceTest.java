@@ -79,43 +79,43 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("결제 기한이 지난 결제 대기 주문은 스케줄러가 취소한다")
-    void cancelsExpiredPaymentWaitingOrder() {
+    @DisplayName("결제 기한이 지난 결제 대기 주문은 스케줄러가 실패 처리한다")
+    void failsExpiredPaymentWaitingOrder() {
         String orderNo = savedOrder(LocalDateTime.now().minusSeconds(1));
 
-        orderExpiryScheduler.cancelExpiredOrders();
+        orderExpiryScheduler.failExpiredOrders();
 
-        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.FAILED);
     }
 
     @Test
-    @DisplayName("결제 기한 전 결제 대기 주문은 스케줄러가 취소하지 않는다")
+    @DisplayName("결제 기한 전 결제 대기 주문은 스케줄러가 실패 처리하지 않는다")
     void keepsPaymentWaitingOrderBeforeExpiresAt() {
         String orderNo = savedOrder(LocalDateTime.now().plusMinutes(10));
 
-        orderExpiryScheduler.cancelExpiredOrders();
+        orderExpiryScheduler.failExpiredOrders();
 
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.PAYMENT_WAITING);
     }
 
     @Test
-    @DisplayName("결제 대기가 아닌 주문은 결제 기한이 지나도 스케줄러가 취소하지 않는다")
+    @DisplayName("결제 대기가 아닌 주문은 결제 기한이 지나도 스케줄러가 실패 처리하지 않는다")
     void keepsNonWaitingOrderPastExpiresAt() {
         String orderNo = savedOrder(LocalDateTime.now().minusSeconds(1));
         markPaid(orderNo);
 
-        orderExpiryScheduler.cancelExpiredOrders();
+        orderExpiryScheduler.failExpiredOrders();
 
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.PAID);
     }
 
     @Test
-    @DisplayName("결제 대기가 아닌 주문은 취소 요청이 와도 상태를 바꾸지 않는다")
-    void keepsNonWaitingOrderOnCancel() {
+    @DisplayName("결제 대기가 아닌 주문은 실패 처리 요청이 와도 상태를 바꾸지 않는다")
+    void keepsNonWaitingOrderOnFail() {
         String orderNo = savedOrder(LocalDateTime.now().plusMinutes(10));
         markPaid(orderNo);
 
-        orderService.cancel(orderNo);
+        orderService.fail(orderNo);
 
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.PAID);
     }
@@ -128,7 +128,7 @@ class OrderServiceTest {
                 .map(task -> task.getTask().toString())
                 .toList();
 
-        assertThat(scheduledTasks).anyMatch(task -> task.endsWith("OrderExpiryScheduler.cancelExpiredOrders"));
+        assertThat(scheduledTasks).anyMatch(task -> task.endsWith("OrderExpiryScheduler.failExpiredOrders"));
     }
 
     private String savedOrder(LocalDateTime expiresAt) {
