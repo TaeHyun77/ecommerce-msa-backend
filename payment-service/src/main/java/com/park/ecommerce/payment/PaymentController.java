@@ -12,12 +12,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-// 게이트웨이가 외부로 노출하지 않는 서비스 간 내부 통신 전용 API - order-service가 결제 인증을 마친 주문의 승인을 요청
-// 같은 주문의 재요청에는 확정된 결과를 그대로 응답하므로, 결과를 모르는 order-service가 안전하게 다시 요청할 수 있음
 @RestController
 @RequestMapping("/internal/payments")
 @RequiredArgsConstructor
-public class PaymentInternalController {
+public class PaymentController {
     private final PaymentService paymentService;
 
     // order-service가 보낸 결제 승인 요청 ( 주문 생성 -> 결제 승인 요청 )

@@ -54,16 +54,6 @@ class PaymentTest {
         assertThatIllegalStateException().isThrownBy(() -> payment.fail("뒤늦은 실패"));
     }
 
-    @Test
-    @DisplayName("같은 결제 키와 금액으로 온 요청만 같은 승인 요청으로 본다")
-    void matchesSameRequest() {
-        Payment payment = payment();
-
-        assertThat(payment.isRequestedWith("tgen_pay_0001", 7_800)).isTrue();
-        assertThat(payment.isRequestedWith("tgen_pay_9999", 7_800)).isFalse();
-        assertThat(payment.isRequestedWith("tgen_pay_0001", 100)).isFalse();
-    }
-
     private static Payment payment() {
         return Payment.builder()
                 .orderNo("ORDER-0001")

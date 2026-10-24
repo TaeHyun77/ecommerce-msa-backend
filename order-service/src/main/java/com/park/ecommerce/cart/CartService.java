@@ -114,7 +114,7 @@ public class CartService {
         if (quantity > CartItem.MAX_QUANTITY) {
             throw new OrderException(OrderErrorCode.MAX_QUANTITY_EXCEEDED);
         }
-        if (!product.canCover(quantity)) {
+        if (!product.hasEnoughStock(quantity)) {
             throw new OrderException(OrderErrorCode.INSUFFICIENT_STOCK);
         }
     }

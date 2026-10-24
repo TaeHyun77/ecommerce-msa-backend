@@ -20,7 +20,7 @@ import java.util.Optional;
 public class PaymentApiClient {
     private final RestClient paymentServiceRestClient;
 
-    // 결과가 확정되면 DONE·FAILED 응답을 돌려주고, 결과를 모르면 PaymentResultUnknownException을 던짐
+    // 결과가 확정되면 DONE, FAILED 응답을 돌려주고, 결과를 모르면 PaymentResultUnknownException을 던짐
     // payment-service는 같은 요청을 다시 받아도 확정된 결과를 그대로 주므로 결과를 모를 때 다시 보내도 안전함
     // 서킷이 열리면 호출 없이 CallNotPermittedException - 호출하는 쪽에서 결과 불명과 같이 다뤄 복구 스케줄러가 다시 처리함
     public PaymentApproveResponse approve(PaymentApproveRequest request) {

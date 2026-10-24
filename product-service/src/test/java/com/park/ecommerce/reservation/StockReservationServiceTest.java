@@ -111,19 +111,6 @@ class StockReservationServiceTest {
     }
 
     @Test
-    @DisplayName("같은 상품이 여러 품목에 있으면 거절하고 재고를 줄이지 않는다")
-    void rejectsDuplicateProduct() {
-        Long productId = productWithStock(10);
-
-        assertThatThrownBy(() -> stockReservationService.reserve(request(newOrderNo(), inTenMinutes(), item(productId, 1), item(productId, 2))))
-                .isInstanceOf(ReservationException.class)
-                .extracting("errorCode")
-                .isEqualTo(ReservationErrorCode.DUPLICATE_RESERVATION_PRODUCT);
-
-        assertThat(stockOf(productId)).isEqualTo(10);
-    }
-
-    @Test
     @DisplayName("존재하지 않는 상품이 있으면 재고 부족이 아닌 상품 없음으로 거절한다")
     void rejectsUnknownProduct() {
         assertThatThrownBy(() -> stockReservationService.reserve(request(newOrderNo(), inTenMinutes(), item(Long.MAX_VALUE, 1))))

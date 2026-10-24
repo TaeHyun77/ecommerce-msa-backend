@@ -24,8 +24,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(PaymentInternalController.class)
-class PaymentInternalControllerTest {
+@WebMvcTest(PaymentController.class)
+class PaymentControllerTest {
     private static final PaymentApproveRequest REQUEST = new PaymentApproveRequest("ORDER-0001", "tgen_pay_0001", 7_800);
 
     @Autowired
