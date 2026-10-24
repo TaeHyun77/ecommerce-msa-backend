@@ -23,7 +23,7 @@
   const memberId = sessionStorage.getItem("memberId") ?? "1";
   const headers = {"Content-Type": "application/json", "X-Member-Id": memberId};
 
-  const TITLES = {PAID: "결제 완료", CANCELLED: "결제 취소 (청구되지 않았습니다)"};
+  const TITLES = {PAID: "결제 완료", FAILED: "결제 실패 (청구되지 않았습니다)"};
 
   async function approve() {
     log(`인증 완료 orderNo=${orderNo}, amount=${params.get("amount")}, paymentKey=${params.get("paymentKey")}`);

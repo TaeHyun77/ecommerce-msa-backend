@@ -23,7 +23,7 @@ public record CartItemResponse(
                 product.price() * quantity,
                 product.thumbnailUrl(),
                 product.isSoldOut(),
-                product.isOnSale() && product.canCover(quantity)
+                product.isOnSale() && product.hasEnoughStock(quantity)
         );
     }
 }

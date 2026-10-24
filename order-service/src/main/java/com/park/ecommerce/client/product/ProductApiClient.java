@@ -22,10 +22,7 @@ import java.util.List;
 public class ProductApiClient {
     private final RestClient productServiceRestClient;
 
-    /** 등록되지 않은 상품 식별자는 응답에서 빠지므로, 호출하는 쪽에서 누락 여부로 미등록을 판단 - 상품 정보 조회
-     * Circuit이 OPEN이면 실제 호출 없이 CallNotPermittedException 발생
-     * → GlobalExceptionHandler에서 HTTP 503으로 변환
-     */
+    // 상품 정보 조회
     public List<ProductSummaryResponse> findProducts(Collection<Long> productIds) {
         try {
             return productServiceRestClient.get()
@@ -33,14 +30,14 @@ public class ProductApiClient {
                             .queryParam("ids", productIds)
                             .build())
                     .retrieve()
-                    .body(new ParameterizedTypeReference<List<ProductSummaryResponse>>() {});
+                    .body(new ParameterizedTypeReference<>() {
+                    });
         } catch (ResourceAccessException e) {
-            // 타임아웃, 커넥션 거부 등 HTTP 상태 코드 이전 단계의 통신 실패 - defaultStatusHandler로는 잡히지 않음
             throw new ProductServiceUnavailableException();
         }
     }
 
-    // 한 상품이라도 재고가 부족하면 product-service가 전체를 롤백하고 409로 응답한다
+    // 한 상품이라도 재고가 부족하면 product-service가 전체를 롤백하고 409로 응답
     public void reserve(StockReservationRequest request) {
         try {
             productServiceRestClient.post()

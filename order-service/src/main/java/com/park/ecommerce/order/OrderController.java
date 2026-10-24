@@ -6,6 +6,7 @@ import com.park.ecommerce.order.domain.OrderStatus;
 import com.park.ecommerce.order.dto.OrderDetailResponse;
 import com.park.ecommerce.order.dto.OrderPaymentRequest;
 import com.park.ecommerce.order.dto.OrderPaymentResponse;
+import com.park.ecommerce.order.dto.OrderSummaryResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -19,7 +20,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-// 회원은 게이트웨이가 JWT를 검증한 뒤 심어준 헤더로 식별 - 요청 파라미터로 받으면 남의 주문에 접근할 수 있음
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/orders")
 @RequiredArgsConstructor
@@ -30,7 +32,22 @@ public class OrderController {
     private final OrderService orderService;
     private final OrderPaymentService orderPaymentService;
 
-    // 주문 생성 - 재고를 선점하고 결제창을 띄우는 데 필요한 값을 응답
+    // 주문 목록 조회 - 요약 정보
+    @GetMapping
+    public List<OrderSummaryResponse> getOrders(@RequestHeader(MEMBER_ID_HEADER) Long memberId) {
+        return orderService.getOrderSummaries(memberId);
+    }
+
+    // 단건 주문 조회 - 상세 정보 ( 결제 정보 포함 )
+    @GetMapping("/{orderNo}")
+    public OrderDetailResponse getOrder(
+            @RequestHeader(MEMBER_ID_HEADER) Long memberId,
+            @PathVariable String orderNo
+    ) {
+        return orderPaymentService.getOrder(memberId, orderNo);
+    }
+
+    // 주문 생성
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public OrderCreateResponse createOrder(
@@ -51,14 +68,5 @@ public class OrderController {
         OrderPaymentResponse response = orderPaymentService.approve(memberId, orderNo, request);
         HttpStatus status = response.status() == OrderStatus.PAID ? HttpStatus.OK : HttpStatus.ACCEPTED;
         return ResponseEntity.status(status).body(response);
-    }
-
-    // 특정 주문 조회
-    @GetMapping("/{orderNo}")
-    public OrderDetailResponse getOrder(
-            @RequestHeader(MEMBER_ID_HEADER) Long memberId,
-            @PathVariable String orderNo
-    ) {
-        return orderService.getOrder(memberId, orderNo);
     }
 }

@@ -23,25 +23,24 @@ public class StockReservationService {
 
     @Transactional
     public void reserve(StockReservationRequest request) {
-        if (request.hasDuplicateProduct()) {
-            throw new ReservationException(ReservationErrorCode.DUPLICATE_RESERVATION_PRODUCT);
-        }
-        // 같은 주문번호가 동시에 들어와 이 검사를 함께 통과해도 orderNo 유니크 제약으로 한쪽이 롤백되어 재고는 한 번만 차감됨
+        // 동일 주문번호의 동시 요청은 유니크 제약으로 중복 저장이 방지되어 재고가 한 번만 차감되도록 함
         if (stockReservationRepository.existsByOrderNo(request.orderNo())) {
             throw new ReservationException(ReservationErrorCode.RESERVATION_ALREADY_EXISTS);
         }
 
-        productService.decreaseStocks(request.quantities());
+        productService.decreaseStocks(request.quantities()); // 재고 차감
 
+        // 특정 주문에 대한 선점 내역 저장
         StockReservation reservation = StockReservation.builder()
                 .orderNo(request.orderNo())
                 .expiresAt(request.expiresAt())
                 .build();
 
+        // 선점 내역에 대한 상품들 정보
         request.items().forEach(item -> reservation.addLine(item.productId(), item.quantity()));
         stockReservationRepository.save(reservation);
 
-        log.info("[재고 선점] 선점 완료 orderNo={}, 만료 시각={}", request.orderNo(), request.expiresAt());
+        log.debug("[재고 선점] 선점 완료 orderNo={}, 만료 시각={}", request.orderNo(), request.expiresAt());
     }
 
     // 만료 시각이 지났으면 아직 해제 전(RESERVED)이어도 확정하지 않는다
@@ -49,7 +48,7 @@ public class StockReservationService {
     @Transactional
     public void confirm(String orderNo) {
         if (stockReservationRepository.confirm(orderNo, LocalDateTime.now()) == 1) {
-            log.info("[재고 선점] 확정 orderNo={}", orderNo);
+            log.debug("[재고 선점] 확정 orderNo={}", orderNo);
             return;
         }
 
@@ -70,7 +69,7 @@ public class StockReservationService {
 
         StockReservation reservation = stockReservationRepository.findByOrderNo(orderNo).orElseThrow();
         productService.increaseStocks(reservation.quantities());
-        log.info("[재고 선점] 해제 orderNo={}", orderNo);
+        log.debug("[재고 선점] 해제 orderNo={}", orderNo);
     }
 
     @Transactional
@@ -81,6 +80,6 @@ public class StockReservationService {
 
         StockReservation reservation = stockReservationRepository.findById(reservationId).orElseThrow();
         productService.increaseStocks(reservation.quantities());
-        log.info("[재고 선점] 만료 해제 orderNo={}", reservation.getOrderNo());
+        log.debug("[재고 선점] 만료 해제 orderNo={}", reservation.getOrderNo());
     }
 }

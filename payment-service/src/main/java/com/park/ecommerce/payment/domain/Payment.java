@@ -48,12 +48,6 @@ public class Payment extends BaseTimeEntity {
         this.status = PaymentStatus.REQUESTED;
     }
 
-    // 재요청인지 판별 - 주문번호가 같아도 결제 키나 금액이 다르면 재요청이 아닌 다른 결제이므로
-    // 기존 결과를 돌려주거나 이어서 승인하지 않음
-    public boolean isRequestedWith(String paymentKey, Integer amount) {
-        return Objects.equals(this.paymentKey, paymentKey) && Objects.equals(this.amount, amount);
-    }
-
     public boolean isCompleted() {
         return status != PaymentStatus.REQUESTED;
     }

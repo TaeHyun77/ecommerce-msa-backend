@@ -32,11 +32,11 @@ public class RestClientConfig {
     }
 
     private ClientHttpRequestFactory requestFactory() {
-        // 토스페이먼츠 권장값 - 결제 처리 API는 카드사 통신이 포함돼 오래 걸릴 수 있어 Read Timeout을 60초로 둔다
-        // 짧게 잡으면 실제로는 승인된 결제가 결과 불명으로 빠지는 경우가 늘어난다
+        // 토스페이먼츠 권장값 - 결제 처리 API는 카드사 통신이 포함돼 오래 걸릴 수 있어 Read Timeout을 60초로 둠
         HttpClientSettings settings = HttpClientSettings.defaults()
-                .withConnectTimeout(Duration.ofSeconds(3))
+                .withConnectTimeout(Duration.ofSeconds(1))
                 .withReadTimeout(Duration.ofSeconds(60));
+
         return ClientHttpRequestFactoryBuilder.detect().build(settings);
     }
 }

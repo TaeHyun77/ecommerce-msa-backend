@@ -1,5 +1,6 @@
 package com.park.ecommerce.order.dto;
 
+import com.park.ecommerce.client.payment.dto.PaymentResponse;
 import com.park.ecommerce.order.domain.Order;
 import com.park.ecommerce.order.domain.OrderStatus;
 
@@ -13,9 +14,13 @@ public record OrderDetailResponse(
         Integer totalAmount,
         LocalDateTime orderedAt,
         LocalDateTime expiresAt,
-        List<Line> lines
+        List<Line> lines,
+        Payment payment // 결제 승인을 요청하기 전이거나 결제 정보를 가져오지 못하면 null
 ) {
     public record Line(Long productId, String productName, Integer unitPrice, Integer quantity) {
+    }
+
+    public record Payment(String status, Integer amount, String method, LocalDateTime approvedAt) {
     }
 
     public static OrderDetailResponse from(Order order) {
@@ -29,7 +34,17 @@ public record OrderDetailResponse(
                 order.getTotalAmount(),
                 order.getOrderedAt(),
                 order.getExpiresAt(),
-                lines
+                lines,
+                null
+        );
+    }
+
+    public OrderDetailResponse withPayment(PaymentResponse payment) {
+        if (payment == null) return this;
+
+        return new OrderDetailResponse(
+                orderNo, status, orderName, totalAmount, orderedAt, expiresAt, lines,
+                new Payment(payment.status(), payment.amount(), payment.method(), payment.approvedAt())
         );
     }
 }

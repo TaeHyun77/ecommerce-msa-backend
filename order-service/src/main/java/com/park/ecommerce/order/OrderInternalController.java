@@ -9,10 +9,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-// 게이트웨이가 외부로 노출하지 않는 서비스 간 내부 통신 전용 API - 인프라(게이트웨이 라우팅 설정)에서 별도로 차단해야 한다.
-@RestController
-@RequestMapping("/internal/orders")
+// 서비스 간 내부 통신 전용 API로, 게이트웨이에서 외부 접근 차단 필요
 @RequiredArgsConstructor
+@RequestMapping("/internal/orders")
+@RestController
 public class OrderInternalController {
     private final OrderService orderService;
 

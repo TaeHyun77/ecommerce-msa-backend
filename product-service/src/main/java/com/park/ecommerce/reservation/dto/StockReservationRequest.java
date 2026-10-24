@@ -35,11 +35,6 @@ public record StockReservationRequest(
     ) {
     }
 
-    // 같은 상품이 두 줄이면 재고가 두 번 차감되므로 요청 자체를 거절하기 위해 검사
-    public boolean hasDuplicateProduct() {
-        return items.stream().map(Item::productId).distinct().count() != items.size();
-    }
-
     public Map<Long, Integer> quantities() {
         return items.stream().collect(Collectors.toMap(Item::productId, Item::quantity));
     }
