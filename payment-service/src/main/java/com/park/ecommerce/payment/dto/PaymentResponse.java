@@ -5,7 +5,7 @@ import com.park.ecommerce.payment.domain.PaymentStatus;
 
 import java.time.LocalDateTime;
 
-// 주문 상세에 보여줄 결제 정보 - paymentKey는 승인과 취소에 쓰이는 값이라 내보내지 않음
+// 주문 상세에 보여줄 결제 정보
 public record PaymentResponse(
         String orderNo,
         PaymentStatus status,

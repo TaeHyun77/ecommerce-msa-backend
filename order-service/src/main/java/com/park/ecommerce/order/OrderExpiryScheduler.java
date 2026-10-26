@@ -15,8 +15,6 @@ public class OrderExpiryScheduler {
     @Scheduled(fixedDelayString = "${order.payment-waiting.expire-poll-delay}")
     public void failExpiredOrders() {
         int failed = orderService.failExpiredOrders();
-        if (failed > 0) {
-            log.info("[주문] 결제 기한 만료로 주문 실패 처리 {}건", failed);
-        }
+        if (failed > 0) log.debug("[주문] 결제 기한 만료로 주문 실패 처리 {}건", failed);
     }
 }

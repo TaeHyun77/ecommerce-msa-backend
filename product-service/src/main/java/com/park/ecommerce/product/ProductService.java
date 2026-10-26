@@ -86,8 +86,7 @@ public class ProductService {
         if (updated == 0) throw new IllegalStateException("존재하지 않는 상품입니다. productId=" + productId);
     }
 
-    // 하나라도 차감하지 못하면 예외로 호출한 트랜잭션 전체를 롤백한다
-    // 상품 id 오름차순으로 행을 잠가, 여러 상품을 동시에 차감·복구하는 트랜잭션끼리 교착되지 않도록 한다
+    // 하나라도 차감하지 못하면 예외로 호출한 트랜잭션 전체를 롤백함, 상품 ID 오름차순으로 행을 잠가 데드락을 방지
     @Transactional
     public void decreaseStocks(Map<Long, Integer> quantities) {
         quantities.keySet().stream().sorted().forEach(productId -> {

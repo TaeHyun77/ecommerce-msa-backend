@@ -136,13 +136,13 @@ class TossPaymentsClientTest {
     }
 
     @Test
-    @DisplayName("토스에 연결할 수 없으면 에러 코드 없이 예외를 던진다 - 결과를 알 수 없는 경우")
+    @DisplayName("토스에 연결할 수 없으면 에러 코드 없이 응답 없음 예외를 던진다 - 결과를 알 수 없는 경우")
     void throwsWithoutCodeWhenUnreachable() {
         server.stop(0);
 
         assertThatThrownBy(() -> tossPaymentsClient.find("tgen_pay_0001"))
                 .isInstanceOf(TossPaymentsException.class)
-                .extracting("code")
-                .isNull();
+                .extracting("code", "noResponse")
+                .containsExactly(null, true);
     }
 }

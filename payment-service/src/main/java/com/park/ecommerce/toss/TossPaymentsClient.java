@@ -52,7 +52,7 @@ public class TossPaymentsClient {
             throw new TossPaymentsException(error.code(), error.message());
         } catch (ResourceAccessException e) {
             // 타임아웃, 연결 실패 - 요청이 토스에 도달해 처리됐는지 알 수 없다
-            throw new TossPaymentsException(null, "토스페이먼츠 호출 실패: " + e.getMessage());
+            throw TossPaymentsException.noResponse("토스페이먼츠 호출 실패: " + e.getMessage());
         }
     }
 }

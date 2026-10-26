@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
-// 주문 재고 선점 - 선점 시점에 재고를 바로 차감하고, 해제되면 복구한다
+// 주문 재고 선점 - 선점 시점에 재고를 바로 차감하고, 해제되면 복구
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -21,6 +21,7 @@ public class StockReservationService {
     private final StockReservationRepository stockReservationRepository;
     private final ProductService productService;
 
+    // 재고 선점
     @Transactional
     public void reserve(StockReservationRequest request) {
         // 동일 주문번호의 동시 요청은 유니크 제약으로 중복 저장이 방지되어 재고가 한 번만 차감되도록 함

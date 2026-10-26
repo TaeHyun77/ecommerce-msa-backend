@@ -28,7 +28,7 @@ public class StockReservationExpiryScheduler {
             try {
                 stockReservationService.expire(reservationId);
             } catch (RuntimeException e) {
-                // 한 건의 실패가 같은 회차의 나머지 건 처리를 막지 않도록 건 단위로 격리 - 실패한 건은 다음 회차에 다시 대상이 된다
+                // 한 건의 실패가 같은 회차의 나머지 건 처리를 막지 않도록 건 단위로 격리 - 실패한 건은 다음 회차에 다시 대상이 됨
                 log.error("[재고 선점] 만료 해제 중 오류 reservationId={}", reservationId, e);
             }
         }

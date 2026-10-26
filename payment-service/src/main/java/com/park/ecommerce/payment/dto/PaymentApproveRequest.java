@@ -5,7 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
-// order-service가 결제 인증을 마친 주문의 승인을 요청 - 금액은 order-service가 주문 금액과 대조한 값
+// order-service가 결제 인증을 마친 주문의 승인을 요청
 public record PaymentApproveRequest(
         @NotBlank(message = "주문번호는 필수입니다.")
         String orderNo,
