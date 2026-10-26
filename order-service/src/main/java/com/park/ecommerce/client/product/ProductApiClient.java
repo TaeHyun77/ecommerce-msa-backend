@@ -60,7 +60,7 @@ public class ProductApiClient {
             return productServiceRestClient.post()
                     .uri("/internal/stock-reservations/{orderNo}/confirm", orderNo)
                     .retrieve()
-                    // 409는 선점이 만료·해제되어 확정할 수 없다는 뜻 - 예외 대신 false로 돌려 product-service 장애와 구분
+                    // 409는 선점이 만료, 해제되어 확정할 수 없다는 뜻 - 예외 대신 false로 product-service 장애와 구분
                     .onStatus(status -> status.value() == HttpStatus.CONFLICT.value(), (req, res) -> {
                     })
                     .toBodilessEntity()

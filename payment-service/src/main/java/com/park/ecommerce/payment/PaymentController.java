@@ -18,13 +18,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class PaymentController {
     private final PaymentService paymentService;
 
-    // order-service가 보낸 결제 승인 요청 ( 주문 생성 -> 결제 승인 요청 )
+    // order-service가 보낸 결제 승인 요청
     @PostMapping("/approve")
     public PaymentApproveResponse approve(@Valid @RequestBody PaymentApproveRequest request) {
         return paymentService.approve(request);
     }
 
-    // order-service가 주문 상세에 보여줄 결제 정보 조회 - 승인을 요청하기 전의 주문은 결제 기록이 없어 404
+    // order-service가 주문 상세에 보여줄 결제 정보 조회
     @GetMapping("/{orderNo}")
     public PaymentResponse getPayment(@PathVariable String orderNo) {
         return paymentService.getPayment(orderNo);

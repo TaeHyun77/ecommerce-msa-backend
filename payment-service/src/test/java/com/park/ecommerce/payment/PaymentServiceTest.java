@@ -101,17 +101,28 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("승인 응답을 받지 못했어도 조회 결과 승인됐으면 완료로 기록한다 - 타임아웃 뒤 실제로는 승인된 경우")
+    @DisplayName("오류 응답을 받았어도 조회 결과 승인됐으면 완료로 기록한다 - 이미 처리된 결제처럼 실패가 아닌 오류 코드")
     void recordsApprovalFoundByInquiry() {
         String orderNo = newOrderNo();
         given(tossPaymentsClient.confirm(PAYMENT_KEY, orderNo, AMOUNT))
-                .willThrow(new TossPaymentsException(null, "토스페이먼츠 호출 실패: Read timed out"));
+                .willThrow(new TossPaymentsException("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다."));
         given(tossPaymentsClient.find(PAYMENT_KEY)).willReturn(tossPayment(orderNo, "DONE"));
 
         PaymentApproveResponse response = paymentService.approve(request(orderNo));
 
         assertThat(response.status()).isEqualTo(PaymentStatus.DONE);
         assertThat(paymentOf(orderNo).getStatus()).isEqualTo(PaymentStatus.DONE);
+    }
+
+    @Test
+    @DisplayName("승인 응답을 받지 못하면 결제를 조회하지 않고 결과 불명으로 남긴다 - 최대 처리 시간이 승인 타임아웃을 넘지 않도록")
+    void leavesRequestedWithoutInquiryWhenNoResponse() {
+        String orderNo = newOrderNo();
+        given(tossPaymentsClient.confirm(PAYMENT_KEY, orderNo, AMOUNT))
+                .willThrow(TossPaymentsException.noResponse("토스페이먼츠 호출 실패: Read timed out"));
+
+        assertResultUnknown(orderNo);
+        verify(tossPaymentsClient, never()).find(anyString());
     }
 
     @Test
@@ -130,9 +141,9 @@ class PaymentServiceTest {
     void leavesRequestedWhenInquiryFails() {
         String orderNo = newOrderNo();
         given(tossPaymentsClient.confirm(PAYMENT_KEY, orderNo, AMOUNT))
-                .willThrow(new TossPaymentsException(null, "토스페이먼츠 호출 실패: Read timed out"));
+                .willThrow(new TossPaymentsException("FAILED_INTERNAL_SYSTEM_PROCESSING", "내부 시스템 처리 작업이 실패했습니다."));
         given(tossPaymentsClient.find(PAYMENT_KEY))
-                .willThrow(new TossPaymentsException(null, "토스페이먼츠 호출 실패: Connection refused"));
+                .willThrow(TossPaymentsException.noResponse("토스페이먼츠 호출 실패: Connection refused"));
 
         assertResultUnknown(orderNo);
     }
@@ -157,9 +168,8 @@ class PaymentServiceTest {
     void retriesRequestedPayment() {
         String orderNo = newOrderNo();
         given(tossPaymentsClient.confirm(PAYMENT_KEY, orderNo, AMOUNT))
-                .willThrow(new TossPaymentsException(null, "토스페이먼츠 호출 실패: Read timed out"))
+                .willThrow(TossPaymentsException.noResponse("토스페이먼츠 호출 실패: Read timed out"))
                 .willReturn(tossPayment(orderNo, "DONE"));
-        given(tossPaymentsClient.find(PAYMENT_KEY)).willReturn(tossPayment(orderNo, "IN_PROGRESS"));
         assertResultUnknown(orderNo);
 
         PaymentApproveResponse response = paymentService.approve(request(orderNo));
