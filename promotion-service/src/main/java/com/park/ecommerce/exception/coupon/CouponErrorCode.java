@@ -9,7 +9,8 @@ public enum CouponErrorCode {
     COUPON_NOT_FOUND(HttpStatus.NOT_FOUND, "쿠폰을 찾을 수 없습니다."),
     NOT_IN_ISSUE_PERIOD(HttpStatus.BAD_REQUEST, "쿠폰 발급 기간이 아닙니다."),
     COUPON_SOLD_OUT(HttpStatus.CONFLICT, "쿠폰이 모두 소진되었습니다."),
-    ALREADY_ISSUED(HttpStatus.CONFLICT, "이미 발급받은 쿠폰입니다.");
+    ALREADY_ISSUED(HttpStatus.CONFLICT, "이미 발급받은 쿠폰입니다."),
+    COUPON_ISSUE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "일시적으로 쿠폰을 발급할 수 없습니다. 잠시 후 다시 시도해 주세요.");
 
     private final HttpStatus status;
     private final String message;

@@ -3,7 +3,7 @@
 # 실행마다 새 쿠폰을 만들므로 회원 번호가 이전 실행과 겹쳐도 중복 발급으로 집계되지 않음
 #
 # 사용 예 (로컬): VUS=100 QUANTITY=50 ./loadtest/run.sh
-#   Redis 수량도 대조하려면: REDIS_CLI="docker exec ecommerce-redis-1 redis-cli" (Redis 선차감 적용 후)
+#   Redis 수량도 대조하려면: REDIS_CLI="docker exec ecommerce-redis-1 redis-cli"
 # 사용 예 (EC2 k6 인스턴스):
 #   VUS=1000 QUANTITY=500 BASE_URL=http://10.0.1.10:8087 \
 #   MYSQL_HOST=10.0.1.10 MYSQL_USER=root MYSQL_PASSWORD=... ./loadtest/run.sh
@@ -27,11 +27,13 @@ mysql_exec() {
     fi
 }
 
-# 1인 1장은 유니크 인덱스에만 의존하므로 없으면 측정 자체가 무의미
-if [[ $(echo "SHOW INDEX FROM member_coupon WHERE Key_name = 'uk_member_coupon_coupon_member';" | mysql_exec | wc -l) -eq 0 ]]; then
-    echo "member_coupon에 유니크 인덱스(uk_member_coupon_coupon_member)가 없습니다. 중단합니다." >&2
-    exit 1
-fi
+# 1인 1장과 수량 한도(발급 번호)는 유니크 인덱스에만 의존하므로 없으면 측정 자체가 무의미
+for INDEX_NAME in uk_member_coupon_coupon_member uk_member_coupon_slot; do
+    if [[ $(echo "SHOW INDEX FROM member_coupon WHERE Key_name = '$INDEX_NAME';" | mysql_exec | wc -l) -eq 0 ]]; then
+        echo "member_coupon에 유니크 인덱스($INDEX_NAME)가 없습니다. 중단합니다." >&2
+        exit 1
+    fi
+done
 
 # 앱(JVM)과 DB의 시간대가 달라도 발급 기간 안에 들도록 넉넉하게 잡음
 COUPON_ID=$(mysql_exec <<SQL
@@ -61,15 +63,17 @@ set -e
 EXPECTED_ISSUED=$(( VUS < QUANTITY ? VUS : QUANTITY ))
 {
     echo "== DB 검증 (쿠폰 id=$COUPON_ID) =="
-    REMAINING=$(echo "SELECT quantity FROM coupon WHERE id = $COUPON_ID;" | mysql_exec)
     ISSUED_ROWS=$(echo "SELECT COUNT(*) FROM member_coupon WHERE coupon_id = $COUPON_ID;" | mysql_exec)
+    REMAINING=$(( QUANTITY - ISSUED_ROWS )) # coupon.quantity는 총 수량이라 줄지 않음
     DUPLICATES=$(echo "SELECT COUNT(*) FROM (SELECT member_id FROM member_coupon WHERE coupon_id = $COUPON_ID GROUP BY member_id HAVING COUNT(*) > 1) d;" | mysql_exec)
     echo "남은 수량: $REMAINING (기대값 $(( QUANTITY - EXPECTED_ISSUED )))"
     echo "발급 행 수: $ISSUED_ROWS (기대값 $EXPECTED_ISSUED)"
     echo "회원별 중복 발급: $DUPLICATES (기대값 0)"
-    # Redis 선차감을 쓸 때만 - Redis가 DB보다 적으면 발급되지 못한 수량이 생긴 것
+    SLOT_DUPLICATES=$(echo "SELECT COUNT(*) FROM (SELECT slot_no FROM member_coupon WHERE coupon_id = $COUPON_ID GROUP BY slot_no HAVING COUNT(*) > 1) d;" | mysql_exec)
+    echo "발급 번호 중복: $SLOT_DUPLICATES (기대값 0)"
+    # Redis 남은 번호가 더 적으면 발급되지 못한 수량이 남은 것 - 초과 발급은 번호 유니크 인덱스가 막음
     if [[ -n "${REDIS_CLI:-}" ]]; then
-        echo "Redis 남은 수량: $($REDIS_CLI GET "coupon:stock:$COUPON_ID") (DB 남은 수량 $REMAINING와 같아야 함)"
+        echo "Redis 남은 번호: $($REDIS_CLI LLEN "coupon:slots:$COUPON_ID") (총 수량 - 발급 행 수 ${REMAINING}와 같아야 함)"
     fi
 
     # 클라이언트가 타임아웃으로 끊어도 서버는 커밋할 수 있어 건수가 아니라 회원 목록으로 대조
