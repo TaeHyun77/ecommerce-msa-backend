@@ -18,7 +18,6 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-// 다운로드해서 주문 총액에 적용하는 쿠폰
 @Getter
 @Entity
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -38,7 +37,7 @@ public class Coupon extends BaseTimeEntity {
     @Column(nullable = false)
     private CouponType type;
 
-    // 남은 발급 수량, 선착순 쿠폰만 값이 있고 기본 쿠폰은 null
+    // 총 발급 수량, 선착순 쿠폰만 값이 있고 기본 쿠폰은 null - 남은 수량은 Redis가 관리
     @Column(updatable = false)
     private Integer quantity;
 
@@ -75,7 +74,7 @@ public class Coupon extends BaseTimeEntity {
         this.useEndAt = useEndAt;
     }
 
-    // 발급 수량 유효성 체크 - 쿠폰 유형과 수량이 서로 어긋난 데이터가 저장되지 않도록
+    // 수량 유효성 체크 - 생성자
     private static void validateQuantity(CouponType type, Integer quantity) {
         if (type == null) {
             throw new IllegalArgumentException("쿠폰 유형은 필수입니다.");
@@ -88,7 +87,7 @@ public class Coupon extends BaseTimeEntity {
         }
     }
 
-    // 기한 유효성 체크
+    // 발급 기한 유효성 체크 - 생성자
     private static void validatePeriod(
             LocalDateTime issueStartAt, LocalDateTime issueEndAt,
             LocalDateTime useStartAt, LocalDateTime useEndAt
@@ -118,7 +117,11 @@ public class Coupon extends BaseTimeEntity {
         return !now.isBefore(useStartAt) && now.isBefore(useEndAt);
     }
 
-    public int calculateDiscountAmount(int totalAmount) {
-        return discount.calculateAmount(totalAmount);
+    // 유니크 제약은 같은 번호의 중복만 막으므로, 번호 없음과 범위 밖 번호는 여기서 걸러야 수량을 넘지 않음
+    public boolean isIssuableSlot(Integer slotNo) {
+        if (type == CouponType.NORMAL) {
+            return slotNo == null;
+        }
+        return slotNo != null && slotNo >= 1 && slotNo <= quantity;
     }
 }
