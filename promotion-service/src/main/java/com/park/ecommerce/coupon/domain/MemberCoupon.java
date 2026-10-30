@@ -9,7 +9,6 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -21,19 +20,15 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-// 회원이 다운로드한 쿠폰 1장 - 쿠폰당 1인 1장과 선착순 발급 번호는 유니크 제약으로 보장해 동시 발급 요청에도 중복되지 않음
+// 회원이 다운로드한 쿠폰 1장
 @Getter
 @Entity
 @Table(uniqueConstraints = {
         @UniqueConstraint(name = MemberCoupon.UK_COUPON_MEMBER, columnNames = {"coupon_id", "member_id"}),
         @UniqueConstraint(name = MemberCoupon.UK_COUPON_SLOT, columnNames = {"coupon_id", "slot_no"})
-}, indexes = {
-        // 내 쿠폰 조회용 - 위 유니크 제약은 coupon_id가 앞이라 회원만으로 찾을 때 쓰이지 않음
-        @Index(name = "idx_member_coupon_member", columnList = "member_id")
 })
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class MemberCoupon extends BaseTimeEntity {
-    // 중복 발급 예외를 다른 제약 위반과 구분할 때도 쓰므로 상수로 둠
     public static final String UK_COUPON_MEMBER = "uk_member_coupon_coupon_member";
     public static final String UK_COUPON_SLOT = "uk_member_coupon_slot";
 
@@ -41,10 +36,12 @@ public class MemberCoupon extends BaseTimeEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // 어떤 쿠폰인지
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "coupon_id", nullable = false)
     private Coupon coupon;
 
+    // 쿠폰을 가진 사용자
     @Column(nullable = false)
     private Long memberId;
 
@@ -52,12 +49,17 @@ public class MemberCoupon extends BaseTimeEntity {
     @Column(updatable = false)
     private Integer slotNo;
 
+    // 쿠폰 상태
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, updatable = false)
     private MemberCouponStatus status;
 
+    // 쿠폰이 사용된 주문
     @Column(updatable = false)
     private String orderNo;
+
+    @Column(updatable = false)
+    private LocalDateTime reservedUntil; // 쿠폰 선점 만료 시각
 
     @Column(updatable = false)
     private LocalDateTime usedAt;
