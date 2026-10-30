@@ -1,6 +1,7 @@
 package com.park.ecommerce.coupon;
 
 import com.park.ecommerce.coupon.domain.*;
+import com.park.ecommerce.coupon.dto.MemberCouponResponse;
 import com.park.ecommerce.exception.coupon.CouponErrorCode;
 import com.park.ecommerce.exception.coupon.CouponException;
 import lombok.RequiredArgsConstructor;
@@ -10,14 +11,24 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
-// 쿠폰 다운로드
-// 회원별 발급 내역을 저장, 선착순 수량은 Redis가 나눠 준 발급 번호를 유니크 제약으로 확인하므로 CouponIssueFacade를 거쳐 호출
+// 회원 쿠폰의 발급 내역 저장과 조회
+// 발급은 선착순 수량을 Redis가 나눠 준 발급 번호를 유니크 제약으로 확인하므로 반드시 CouponIssueFacade를 거쳐 호출 - 직접 부르면 번호 분배와 반납을 건너뜀
 @Service
 @RequiredArgsConstructor
-public class CouponIssueService {
+public class CouponService {
     private final CouponRepository couponRepository;
     private final MemberCouponRepository memberCouponRepository;
+
+    // 내 쿠폰 목록 조회 - 최근 발급순
+    @Transactional(readOnly = true)
+    public List<MemberCouponResponse> getMyCoupons(Long memberId) {
+        LocalDateTime now = LocalDateTime.now();
+        return memberCouponRepository.findAllWithCouponByMemberIdOrderByIdDesc(memberId).stream()
+                .map(memberCoupon -> MemberCouponResponse.from(memberCoupon, now))
+                .toList();
+    }
 
     // 짧은 제한 시간 - 결과 불명으로 반납된 번호를 받은 요청이 아직 끝나지 않은 이전 트랜잭션의 잠금을 오래 기다리지 않도록
     @Transactional(timeout = 3)

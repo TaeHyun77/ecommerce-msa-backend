@@ -40,7 +40,7 @@ class CouponIssueConcurrencyTest {
     static MySQLContainer mysql = new MySQLContainer("mysql:8.0");
 
     @Autowired
-    private CouponIssueService couponIssueService;
+    private CouponService couponService;
 
     @Autowired
     private CouponRepository couponRepository;
@@ -56,7 +56,7 @@ class CouponIssueConcurrencyTest {
         Long memberId = 1L;
 
         List<Throwable> errors = runConcurrently(IntStream.range(0, 10)
-                .<Runnable>mapToObj(i -> () -> couponIssueService.issue(couponId, memberId, i + 1))
+                .<Runnable>mapToObj(i -> () -> couponService.issue(couponId, memberId, i + 1))
                 .toList());
 
         assertThat(errors).hasSize(9)
@@ -73,10 +73,10 @@ class CouponIssueConcurrencyTest {
     void rejectsDuplicateByUniqueConstraint() {
         Long couponId = firstComeCoupon();
         Long memberId = 1L;
-        couponIssueService.issue(couponId, memberId, 1);
+        couponService.issue(couponId, memberId, 1);
         doReturn(false).when(memberCouponRepository).existsByCouponIdAndMemberId(couponId, memberId);
 
-        assertThatThrownBy(() -> couponIssueService.issue(couponId, memberId, 2))
+        assertThatThrownBy(() -> couponService.issue(couponId, memberId, 2))
                 .isInstanceOf(CouponException.class)
                 .extracting("errorCode")
                 .isEqualTo(CouponErrorCode.ALREADY_ISSUED);
@@ -90,7 +90,7 @@ class CouponIssueConcurrencyTest {
         Long couponId = firstComeCoupon();
 
         List<Throwable> errors = runConcurrently(IntStream.rangeClosed(1, 10)
-                .<Runnable>mapToObj(memberId -> () -> couponIssueService.issue(couponId, (long) memberId, 1))
+                .<Runnable>mapToObj(memberId -> () -> couponService.issue(couponId, (long) memberId, 1))
                 .toList());
 
         assertThat(errors).hasSize(9)
@@ -108,7 +108,7 @@ class CouponIssueConcurrencyTest {
         Long couponId = firstComeCoupon();
 
         for (Integer slotNo : new Integer[]{null, 0, 501}) {
-            assertThatThrownBy(() -> couponIssueService.issue(couponId, 1L, slotNo))
+            assertThatThrownBy(() -> couponService.issue(couponId, 1L, slotNo))
                     .isInstanceOf(CouponException.class)
                     .extracting("errorCode")
                     .isEqualTo(CouponErrorCode.COUPON_ISSUE_UNAVAILABLE);
