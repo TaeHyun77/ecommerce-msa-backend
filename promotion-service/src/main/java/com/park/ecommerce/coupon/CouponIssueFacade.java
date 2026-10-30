@@ -35,7 +35,7 @@ public class CouponIssueFacade {
     private final CouponStockRepository couponStockRepository;
     private final CouponRepository couponRepository;
     private final MemberCouponRepository memberCouponRepository;
-    private final CouponIssueService couponIssueService;
+    private final CouponService couponService;
 
     private final Map<Long, Object> initLocks = new ConcurrentHashMap<>();
     // 발급 기간, 유형 확인용 - 오픈 전후 몰리는 요청마다 DB를 조회하지 않도록 메모리에 둠
@@ -48,7 +48,7 @@ public class CouponIssueFacade {
         // 기본 쿠폰은 수량 제한이 없어 Redis를 거치지 않음 - 1인 1장은 DB 유니크 제약이 지킴
         Integer slotNo = coupon.getType() == CouponType.FIRST_COME ? acquireSlot(coupon, memberId) : null;
         try {
-            couponIssueService.issue(couponId, memberId, slotNo);
+            couponService.issue(couponId, memberId, slotNo);
         } catch (CouponException e) {
             if (slotNo != null) compensate(couponId, memberId, slotNo, e.getErrorCode());
             throw e;

@@ -72,7 +72,7 @@ class CouponIssueFacadeTest {
 
     // Redis에서 떨어진 요청이 DB 처리까지 가지 않았는지 호출 횟수로 확인하고, DB 실패를 만들기 위해 spy로 둠
     @MockitoSpyBean
-    private CouponIssueService couponIssueService;
+    private CouponService couponService;
 
     // Redis 장애와 키 유실을 만들기 위해 spy로 둠 - 스텁하지 않으면 실제 동작 그대로
     @MockitoSpyBean
@@ -106,7 +106,7 @@ class CouponIssueFacadeTest {
         assertThat(issued.get()).isEqualTo(COUPON_QUANTITY);
         assertThat(errors).hasSize(1000 - COUPON_QUANTITY)
                 .allSatisfy(error -> assertErrorCode(error, CouponErrorCode.COUPON_SOLD_OUT));
-        verify(couponIssueService, times(COUPON_QUANTITY)).issue(eq(couponId), anyLong(), any());
+        verify(couponService, times(COUPON_QUANTITY)).issue(eq(couponId), anyLong(), any());
         assertThat(memberCouponRepository.countByCouponId(couponId)).isEqualTo(COUPON_QUANTITY);
         assertThat(remainingSlotsOf(couponId)).isZero();
     }
@@ -124,7 +124,7 @@ class CouponIssueFacadeTest {
 
         assertThat(errors).hasSize(10)
                 .allSatisfy(error -> assertErrorCode(error, CouponErrorCode.ALREADY_ISSUED));
-        verify(couponIssueService, times(1)).issue(eq(couponId), eq(memberId), any());
+        verify(couponService, times(1)).issue(eq(couponId), eq(memberId), any());
         assertThat(remainingSlotsOf(couponId)).isEqualTo(COUPON_QUANTITY - 1);
     }
 
@@ -172,7 +172,7 @@ class CouponIssueFacadeTest {
     @DisplayName("Redis에 번호가 없으면 DB에서 쓰이지 않은 번호로 채운 뒤 나눠 준다")
     void initializesSlotsFromUnusedNumbers() {
         Long couponId = firstComeCoupon(COUPON_QUANTITY);
-        couponIssueService.issue(couponId, 1L, 1); // Redis를 거치지 않고 DB에서 먼저 1번이 발급된 상태
+        couponService.issue(couponId, 1L, 1); // Redis를 거치지 않고 DB에서 먼저 1번이 발급된 상태
 
         couponIssueFacade.issue(couponId, 2L);
 
@@ -201,7 +201,7 @@ class CouponIssueFacadeTest {
     void cancelsSlotWhenDatabaseRejects() {
         Long couponId = firstComeCoupon(COUPON_QUANTITY);
         Long memberId = 1L;
-        doThrow(new CouponException(CouponErrorCode.NOT_IN_ISSUE_PERIOD)).when(couponIssueService).issue(eq(couponId), eq(memberId), any());
+        doThrow(new CouponException(CouponErrorCode.NOT_IN_ISSUE_PERIOD)).when(couponService).issue(eq(couponId), eq(memberId), any());
 
         assertThatThrownBy(() -> couponIssueFacade.issue(couponId, memberId))
                 .satisfies(error -> assertErrorCode(error, CouponErrorCode.NOT_IN_ISSUE_PERIOD));
@@ -214,7 +214,7 @@ class CouponIssueFacadeTest {
     void cancelsSlotWhenTransactionNotStarted() {
         Long couponId = firstComeCoupon(COUPON_QUANTITY);
         Long memberId = 1L;
-        doThrow(new CannotCreateTransactionException("커넥션 획득 실패")).when(couponIssueService).issue(eq(couponId), eq(memberId), any());
+        doThrow(new CannotCreateTransactionException("커넥션 획득 실패")).when(couponService).issue(eq(couponId), eq(memberId), any());
 
         assertThatThrownBy(() -> couponIssueFacade.issue(couponId, memberId))
                 .isInstanceOf(CannotCreateTransactionException.class);
@@ -237,7 +237,7 @@ class CouponIssueFacadeTest {
                     .slotNo(invocation.getArgument(2))
                     .build()));
             throw new TransactionSystemException("커밋 응답 없음");
-        }).when(couponIssueService).issue(eq(couponId), eq(1L), any());
+        }).when(couponService).issue(eq(couponId), eq(1L), any());
 
         assertThatThrownBy(() -> couponIssueFacade.issue(couponId, 1L))
                 .isInstanceOf(TransactionSystemException.class);
@@ -260,7 +260,7 @@ class CouponIssueFacadeTest {
             // 재초기화로 같은 번호를 받아 먼저 커밋 - 같은 스레드면 이 요청의 트랜잭션에 합류하므로 다른 스레드에서 실행
             CompletableFuture.runAsync(() -> couponIssueFacade.issue(couponId, 2L)).join();
             return invocation.callRealMethod();
-        }).when(couponIssueService).issue(eq(couponId), eq(1L), any());
+        }).when(couponService).issue(eq(couponId), eq(1L), any());
 
         assertThatThrownBy(() -> couponIssueFacade.issue(couponId, 1L))
                 .satisfies(error -> assertErrorCode(error, CouponErrorCode.COUPON_ISSUE_UNAVAILABLE));
@@ -331,7 +331,7 @@ class CouponIssueFacadeTest {
 
         assertThatThrownBy(() -> couponIssueFacade.issue(couponId, 1L))
                 .satisfies(error -> assertErrorCode(error, CouponErrorCode.COUPON_ISSUE_UNAVAILABLE));
-        verify(couponIssueService, never()).issue(anyLong(), anyLong(), any());
+        verify(couponService, never()).issue(anyLong(), anyLong(), any());
     }
 
     // 오픈 전 요청이 번호를 붙잡은 채 DB를 기다리면, 오픈 직후 정상 요청이 소진으로 실패할 수 있음
@@ -344,7 +344,7 @@ class CouponIssueFacadeTest {
         assertThatThrownBy(() -> couponIssueFacade.issue(couponId, 1L))
                 .satisfies(error -> assertErrorCode(error, CouponErrorCode.NOT_IN_ISSUE_PERIOD));
         verify(couponStockRepository, never()).tryAcquire(anyLong(), anyLong());
-        verify(couponIssueService, never()).issue(anyLong(), anyLong(), any());
+        verify(couponService, never()).issue(anyLong(), anyLong(), any());
     }
 
     private static void assertErrorCode(Throwable error, CouponErrorCode errorCode) {

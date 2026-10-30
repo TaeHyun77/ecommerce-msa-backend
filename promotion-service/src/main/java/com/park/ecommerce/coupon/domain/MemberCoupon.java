@@ -9,6 +9,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -26,6 +27,9 @@ import java.time.LocalDateTime;
 @Table(uniqueConstraints = {
         @UniqueConstraint(name = MemberCoupon.UK_COUPON_MEMBER, columnNames = {"coupon_id", "member_id"}),
         @UniqueConstraint(name = MemberCoupon.UK_COUPON_SLOT, columnNames = {"coupon_id", "slot_no"})
+}, indexes = {
+        // 내 쿠폰 조회용 - 위 유니크 제약은 coupon_id가 앞이라 회원만으로 찾을 때 쓰이지 않음
+        @Index(name = "idx_member_coupon_member", columnList = "member_id")
 })
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class MemberCoupon extends BaseTimeEntity {
