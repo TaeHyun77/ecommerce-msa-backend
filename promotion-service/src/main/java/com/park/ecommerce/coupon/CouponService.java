@@ -1,6 +1,8 @@
 package com.park.ecommerce.coupon;
 
 import com.park.ecommerce.coupon.domain.*;
+import com.park.ecommerce.coupon.dto.CouponReserveRequest;
+import com.park.ecommerce.coupon.dto.CouponReserveResponse;
 import com.park.ecommerce.coupon.dto.MemberCouponResponse;
 import com.park.ecommerce.exception.coupon.CouponErrorCode;
 import com.park.ecommerce.exception.coupon.CouponException;
@@ -13,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 
-// 회원 쿠폰의 발급 내역 저장과 조회
+// 회원 쿠폰의 발급, 조회, 주문 사용(선점 → 확정 → 해제)
 // 발급은 선착순 수량을 Redis가 나눠 준 발급 번호를 유니크 제약으로 확인하므로 반드시 CouponIssueFacade를 거쳐 호출 - 직접 부르면 번호 분배와 반납을 건너뜀
 @Service
 @RequiredArgsConstructor
@@ -30,35 +32,82 @@ public class CouponService {
                 .toList();
     }
 
-    // 짧은 제한 시간 - 결과 불명으로 반납된 번호를 받은 요청이 아직 끝나지 않은 이전 트랜잭션의 잠금을 오래 기다리지 않도록
-    @Transactional(timeout = 3)
+    // 쿠폰 발급
+    @Transactional
     public void issue(Long couponId, Long memberId, Integer slotNo) {
         Coupon coupon = couponRepository.findById(couponId)
                 .orElseThrow(() -> new CouponException(CouponErrorCode.COUPON_NOT_FOUND));
 
-        if (!coupon.isInIssuePeriod(LocalDateTime.now())) {
+        if (!coupon.isInIssuePeriod(LocalDateTime.now())) { // 발급 유효성 확인
             throw new CouponException(CouponErrorCode.NOT_IN_ISSUE_PERIOD);
         }
-        // 회원 중복보다 먼저 확인 - 이미 받은 회원으로 처리되면 잘못된 번호가 Redis에 반납되어 다시 나감
-        if (!coupon.isIssuableSlot(slotNo)) {
+        if (!coupon.isIssuableSlot(slotNo)) { // 쿠폰 번호 유효성 확인
             throw new CouponException(CouponErrorCode.COUPON_ISSUE_UNAVAILABLE);
         }
-        // 유니크 제약 위반은 InnoDB가 해당 행에 공유 잠금을 남겨 이웃 INSERT를 막을 수 있으므로, 흔한 재요청은 먼저 걸러냄
-        // 동시 요청은 아래 유니크 제약이 막음
-        if (memberCouponRepository.existsByCouponIdAndMemberId(couponId, memberId)) {
+
+        if (memberCouponRepository.existsByCouponIdAndMemberId(couponId, memberId)) { // 이미 발급받은 쿠폰인지 확인
             throw new CouponException(CouponErrorCode.ALREADY_ISSUED);
         }
 
-        // 제약 위반을 이 메서드 안에서 받기 위해 즉시 flush - 커밋 시점으로 미뤄지면 아래 catch를 벗어남
         try {
             memberCouponRepository.saveAndFlush(MemberCoupon.builder()
                     .coupon(coupon)
                     .memberId(memberId)
                     .slotNo(slotNo)
-                    .build());
+                    .build()
+            );
         } catch (DataIntegrityViolationException e) {
             throw toCouponException(e);
         }
+    }
+
+    // 주문 생성 시 쿠폰을 주문에 선점
+    // 사용 기간은 선점 시점에만 확인 - 이후로는 선점 만료(결제 기한)가 지켜, 결제 중 사용 기간이 끝나도 이 주문에는 쓸 수 있음
+    @Transactional
+    public CouponReserveResponse reserve(CouponReserveRequest request) {
+        MemberCoupon memberCoupon = memberCouponRepository.findWithCouponByIdAndMemberId(request.memberCouponId(), request.memberId())
+                .orElseThrow(() -> new CouponException(CouponErrorCode.MEMBER_COUPON_NOT_FOUND));
+
+        Coupon coupon = memberCoupon.getCoupon();
+        if (!coupon.isInUsePeriod(LocalDateTime.now())) { // 사용 기간 유효성 확인
+            throw new CouponException(CouponErrorCode.NOT_IN_USE_PERIOD);
+        }
+        if (memberCouponRepository.reserve(memberCoupon.getId(), request.orderNo(), request.expiresAt()) == 0) { // 선점 요청 (조건부 update)
+            throw new CouponException(CouponErrorCode.COUPON_NOT_AVAILABLE);
+        }
+
+        // 할인액이 주문 금액과 같아 0원 결제가 되는 경우도 허용 - PG 승인 생략은 order-service가 처리
+        return new CouponReserveResponse(coupon.getDiscount().calculateAmount(request.orderAmount()));
+    }
+
+    // 쿠폰 사용 확정
+    // 만료 여부를 먼저 확인한 뒤 주문번호 조회와 PK 기반 UPDATE로 확정 처리하여, 스케줄러 실행 순서와 동시 요청에 관계없이 만료된 쿠폰의 확정 및 중복 확정을 방지합니다.
+    @Transactional
+    public void confirm(String orderNo) {
+        // 선점이 없으면 만료나 해제로 주문번호가 지워진 것
+        MemberCoupon memberCoupon = memberCouponRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new CouponException(CouponErrorCode.COUPON_RESERVATION_EXPIRED));
+
+        // 승인 결과를 몰라 order-service가 다시 확정을 요청한 경우 - 이미 확정됐으면 성공으로 응답
+        if (memberCoupon.getStatus() == MemberCouponStatus.USED) {
+            return;
+        }
+        if (memberCouponRepository.confirm(memberCoupon.getId(), orderNo, LocalDateTime.now()) == 0) {
+            throw new CouponException(CouponErrorCode.COUPON_RESERVATION_EXPIRED);
+        }
+    }
+
+    // 쿠폰 선점 해제
+    @Transactional
+    public void release(String orderNo) {
+        memberCouponRepository.findByOrderNo(orderNo)
+                .ifPresent(memberCoupon -> memberCouponRepository.release(memberCoupon.getId(), orderNo));
+    }
+
+    // 쿠폰 만료처리
+    @Transactional
+    public void expire(Long memberCouponId) {
+        memberCouponRepository.expire(memberCouponId, LocalDateTime.now());
     }
 
     // 유니크 제약 외의 위반(NOT NULL 등)까지 발급 실패로 숨기지 않도록 제약 이름으로 구분
