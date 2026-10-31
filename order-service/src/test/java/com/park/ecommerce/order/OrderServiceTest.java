@@ -134,17 +134,6 @@ class OrderServiceTest {
     }
 
     @Test
-    @DisplayName("결제 대기가 아닌 주문은 실패 처리 요청이 와도 상태를 바꾸지 않는다")
-    void keepsNonWaitingOrderOnFail() {
-        String orderNo = savedOrder(LocalDateTime.now().plusMinutes(10));
-        markPaid(orderNo);
-
-        orderService.fail(orderNo);
-
-        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.PAID);
-    }
-
-    @Test
     @DisplayName("결제 기한 만료 스케줄러가 주기 작업으로 등록된다 - 테스트는 직접 호출하므로 등록 누락을 따로 확인")
     void registersExpirySchedulerAsScheduledTask() {
         List<String> scheduledTasks = applicationContext.getBeansOfType(ScheduledTaskHolder.class).values().stream()

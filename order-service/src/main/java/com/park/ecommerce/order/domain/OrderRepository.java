@@ -21,14 +21,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     Optional<Order> findByOrderNoAndMemberId(String orderNo, Long memberId);
 
-    // 해당 주문을 FAILED 상태로 변경
-    // 상태는 조건부 UPDATE로만 바꿈 - 결제 대기가 아닌 주문(결제 중/완료)을 늦게 도착한 실패 처리가 덮어쓰지 않도록
-    @Modifying
-    @Query("update Order o set o.status = FAILED where o.orderNo = :orderNo and o.status = PAYMENT_WAITING")
-    int failPaymentWaiting(String orderNo);
-
     // 기한이 지난 모든 결제 대기 주문을 FAILED로
-    // 재고 복구는 product-service가 선점 만료로 따로 처리하므로 건별 후처리 없이 한 번에 실패 처리
+    // 재고·쿠폰 복구는 product-service·promotion-service가 선점 만료로 따로 처리하므로 건별 후처리 없이 한 번에 실패 처리
     @Modifying
     @Query("update Order o set o.status = FAILED where o.status = PAYMENT_WAITING and o.expiresAt <= :now")
     int failExpired(LocalDateTime now);

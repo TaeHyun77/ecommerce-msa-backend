@@ -5,6 +5,7 @@ import com.park.ecommerce.exception.OrderException;
 import com.park.ecommerce.exception.PaymentResultUnknownException;
 import com.park.ecommerce.exception.PaymentServiceUnavailableException;
 import com.park.ecommerce.exception.ProductServiceUnavailableException;
+import com.park.ecommerce.exception.PromotionServiceUnavailableException;
 import com.park.ecommerce.order.domain.Order;
 import com.park.ecommerce.order.domain.OrderRepository;
 import com.park.ecommerce.order.domain.OrderStatus;
@@ -16,6 +17,7 @@ import com.park.ecommerce.client.payment.dto.PaymentApproveRequest;
 import com.park.ecommerce.client.payment.dto.PaymentApproveResponse;
 import com.park.ecommerce.client.payment.dto.PaymentResponse;
 import com.park.ecommerce.client.product.ProductApiClient;
+import com.park.ecommerce.client.promotion.PromotionApiClient;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.junit.jupiter.api.DisplayName;
@@ -47,7 +49,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-// 상태 전이는 조건부 UPDATE의 조건이 핵심이라 실제 MySQL로 확인하고, 외부 서비스인 product-service·payment-service만 대체한다
+// 상태 전이는 조건부 UPDATE의 조건이 핵심이라 실제 MySQL로 확인하고, 외부 서비스인 product·promotion·payment-service만 대체한다
 @Testcontainers
 @SpringBootTest(properties = {
         "order.payment-waiting.ttl=10m",
@@ -61,6 +63,9 @@ class OrderPaymentServiceTest {
     private static final Long MEMBER_ID = 1L;
     private static final String PAYMENT_KEY = "tgen_pay_0001";
     private static final int AMOUNT = 7_800;
+    private static final Long MEMBER_COUPON_ID = 10L;
+    private static final int DISCOUNT = 2_000;
+    private static final int DISCOUNTED_AMOUNT = AMOUNT - DISCOUNT;
 
     @Container
     @ServiceConnection
@@ -87,6 +92,9 @@ class OrderPaymentServiceTest {
     @MockitoBean
     private PaymentApiClient paymentApiClient;
 
+    @MockitoBean
+    private PromotionApiClient promotionApiClient;
+
     @Test
     @DisplayName("결제를 승인하면 선점을 먼저 확정한 뒤 결제 승인을 요청하고 결제 완료로 바꾼다")
     void confirmsReservationBeforeApprovingPayment() {
@@ -101,6 +109,94 @@ class OrderPaymentServiceTest {
         InOrder inOrder = inOrder(productApiClient, paymentApiClient);
         inOrder.verify(productApiClient).confirmReservation(orderNo);
         inOrder.verify(paymentApiClient).approve(new PaymentApproveRequest(orderNo, PAYMENT_KEY, AMOUNT));
+        verifyNoInteractions(promotionApiClient); // 쿠폰을 쓰지 않은 주문
+    }
+
+    @Test
+    @DisplayName("쿠폰 주문은 재고 확정 → 쿠폰 확정 → 할인된 결제 금액으로 승인 순서로 처리한다")
+    void confirmsCouponBeforeApprovingDiscountedAmount() {
+        String orderNo = couponOrder();
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(promotionApiClient.confirmCoupon(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willReturn(done(orderNo));
+
+        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(DISCOUNTED_AMOUNT));
+
+        assertThat(response.status()).isEqualTo(OrderStatus.PAID);
+        InOrder inOrder = inOrder(productApiClient, promotionApiClient, paymentApiClient);
+        inOrder.verify(productApiClient).confirmReservation(orderNo);
+        inOrder.verify(promotionApiClient).confirmCoupon(orderNo);
+        inOrder.verify(paymentApiClient).approve(new PaymentApproveRequest(orderNo, PAYMENT_KEY, DISCOUNTED_AMOUNT));
+    }
+
+    @Test
+    @DisplayName("쿠폰 주문에 할인 전 금액으로 결제를 요청하면 금액 불일치로 거절한다")
+    void rejectsUndiscountedAmountForCouponOrder() {
+        String orderNo = couponOrder();
+
+        assertRejected(orderNo, request(AMOUNT), OrderErrorCode.PAYMENT_AMOUNT_MISMATCH);
+
+        verifyNoInteractions(productApiClient, promotionApiClient, paymentApiClient);
+    }
+
+    @Test
+    @DisplayName("쿠폰 선점이 만료돼 확정하지 못하면 확정한 재고 선점을 해제하고 결제 없이 실패 처리한다")
+    void releasesStockWhenCouponReservationExpired() {
+        String orderNo = couponOrder();
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(promotionApiClient.confirmCoupon(orderNo)).willReturn(false);
+
+        assertRejected(orderNo, request(DISCOUNTED_AMOUNT), OrderErrorCode.ORDER_EXPIRED);
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.FAILED);
+        verify(productApiClient).releaseReservation(orderNo);
+        verify(paymentApiClient, never()).approve(any());
+    }
+
+    @Test
+    @DisplayName("쿠폰 주문의 결제가 거절되면 쿠폰을 먼저 해제한 뒤 재고 선점을 해제하고 실패 처리한다")
+    void releasesCouponThenStockWhenPaymentFailed() {
+        String orderNo = couponOrder();
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(promotionApiClient.confirmCoupon(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willReturn(failed(orderNo));
+
+        assertRejected(orderNo, request(DISCOUNTED_AMOUNT), OrderErrorCode.PAYMENT_FAILED);
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.FAILED);
+        InOrder inOrder = inOrder(promotionApiClient, productApiClient);
+        inOrder.verify(promotionApiClient).releaseCoupon(orderNo);
+        inOrder.verify(productApiClient).releaseReservation(orderNo);
+    }
+
+    @Test
+    @DisplayName("결제 거절 뒤 쿠폰 해제에 실패하면 재고를 해제하지 않고 승인 중으로 남긴다 - 복구에서 처음부터 다시 처리")
+    void staysApprovingWhenCouponReleaseFails() {
+        String orderNo = couponOrder();
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(promotionApiClient.confirmCoupon(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willReturn(failed(orderNo));
+        willThrow(new PromotionServiceUnavailableException()).given(promotionApiClient).releaseCoupon(orderNo);
+
+        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(DISCOUNTED_AMOUNT));
+
+        assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
+        assertThat(approvalUnknownAtOf(orderNo)).isNotNull();
+        verify(productApiClient, never()).releaseReservation(anyString());
+    }
+
+    @Test
+    @DisplayName("쿠폰 확정 중 promotion-service 장애가 나면 결제를 요청하지 않고 승인 중으로 남긴다")
+    void staysApprovingWhenCouponConfirmFails() {
+        String orderNo = couponOrder();
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(promotionApiClient.confirmCoupon(orderNo)).willThrow(new PromotionServiceUnavailableException());
+
+        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(DISCOUNTED_AMOUNT));
+
+        assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
+        assertThat(approvalUnknownAtOf(orderNo)).isNotNull();
+        verify(paymentApiClient, never()).approve(any());
     }
 
     @Test
@@ -257,6 +353,35 @@ class OrderPaymentServiceTest {
 
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.FAILED);
         verify(productApiClient).releaseReservation(orderNo);
+    }
+
+    @Test
+    @DisplayName("쿠폰 주문을 복구하면 쿠폰을 다시 확정하고 할인된 결제 금액으로 승인을 다시 요청한다")
+    void recoversCouponOrderWithDiscountedAmount() {
+        String orderNo = couponOrder();
+        changeStatus(orderNo, "APPROVING", LocalDateTime.now().minusMinutes(3));
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(promotionApiClient.confirmCoupon(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(new PaymentApproveRequest(orderNo, PAYMENT_KEY, DISCOUNTED_AMOUNT))).willReturn(done(orderNo));
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("결제 키 없이 승인 중으로 남은 0원 주문을 복구하면 PG 승인 없이 결제 완료로 확정한다")
+    void recoversZeroAmountOrderWithoutPayment() {
+        String orderNo = savedOrder(LocalDateTime.now().plusMinutes(10), AMOUNT);
+        jdbcTemplate.update("update orders set status = 'APPROVING', approval_requested_at = ?, approval_unknown_at = ? where order_no = ?",
+                LocalDateTime.now().minusSeconds(30), LocalDateTime.now(), orderNo);
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(promotionApiClient.confirmCoupon(orderNo)).willReturn(true);
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.PAID);
+        verifyNoInteractions(paymentApiClient);
     }
 
     @Test
@@ -451,12 +576,24 @@ class OrderPaymentServiceTest {
     }
 
     private String savedOrder(LocalDateTime expiresAt) {
+        return savedOrder(expiresAt, null);
+    }
+
+    // 쿠폰으로 DISCOUNT만큼 할인된 결제 대기 주문
+    private String couponOrder() {
+        return savedOrder(LocalDateTime.now().plusMinutes(10), DISCOUNT);
+    }
+
+    private String savedOrder(LocalDateTime expiresAt, Integer discountAmount) {
         Order order = Order.builder()
                 .memberId(MEMBER_ID)
                 .orderedAt(LocalDateTime.now().minusMinutes(1))
                 .expiresAt(expiresAt)
                 .build();
         order.addLine(1L, "유기농 우유 900ml", 3_900, 2);
+        if (discountAmount != null) {
+            order.applyCoupon(MEMBER_COUPON_ID, discountAmount);
+        }
         orderRepository.save(order);
         return order.getOrderNo();
     }

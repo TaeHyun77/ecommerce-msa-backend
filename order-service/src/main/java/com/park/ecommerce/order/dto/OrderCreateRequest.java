@@ -12,7 +12,9 @@ import java.util.List;
 // 장바구니 주문과 바로 구매를 같은 형식으로 받음
 public record OrderCreateRequest(
         @NotEmpty(message = "주문 품목은 1개 이상이어야 합니다.")
-        List<@Valid Item> items
+        List<@Valid Item> items,
+
+        Long memberCouponId // 적용할 쿠폰 - 쓰지 않으면 null
 ) {
     public record Item(
             @NotNull(message = "상품은 필수입니다.")

@@ -23,6 +23,51 @@ class OrderTest {
     }
 
     @Test
+    @DisplayName("쿠폰이 없으면 할인액은 0원이고 결제 금액은 상품 합계와 같다")
+    void paysTotalWithoutCoupon() {
+        Order order = order();
+        order.addLine(1L, "유기농 우유 900ml", 3_900, 2);
+
+        assertThat(order.hasCoupon()).isFalse();
+        assertThat(order.getDiscountAmount()).isZero();
+        assertThat(order.getPaymentAmount()).isEqualTo(7_800);
+    }
+
+    @Test
+    @DisplayName("쿠폰을 적용하면 상품 합계는 그대로 두고 결제 금액만 할인액만큼 줄어든다")
+    void appliesCouponDiscount() {
+        Order order = order();
+        order.addLine(1L, "유기농 우유 900ml", 3_900, 2);
+
+        order.applyCoupon(10L, 2_000);
+
+        assertThat(order.hasCoupon()).isTrue();
+        assertThat(order.getTotalAmount()).isEqualTo(7_800);
+        assertThat(order.getPaymentAmount()).isEqualTo(5_800);
+    }
+
+    @Test
+    @DisplayName("상품 합계 전액을 할인하면 결제 금액은 0원이다")
+    void allowsFullDiscount() {
+        Order order = order();
+        order.addLine(1L, "유기농 우유 900ml", 3_900, 2);
+
+        order.applyCoupon(10L, 7_800);
+
+        assertThat(order.getPaymentAmount()).isZero();
+    }
+
+    @Test
+    @DisplayName("할인액이 상품 합계보다 크거나 음수면 예외가 발생한다 - 결제 금액이 음수가 되지 않도록")
+    void rejectsDiscountOutOfRange() {
+        Order order = order();
+        order.addLine(1L, "유기농 우유 900ml", 3_900, 2);
+
+        assertThatIllegalArgumentException().isThrownBy(() -> order.applyCoupon(10L, 7_801));
+        assertThatIllegalArgumentException().isThrownBy(() -> order.applyCoupon(10L, -1));
+    }
+
+    @Test
     @DisplayName("새 주문은 결제 대기 상태로 시작한다")
     void startsPaymentWaiting() {
         assertThat(order().getStatus()).isEqualTo(OrderStatus.PAYMENT_WAITING);
