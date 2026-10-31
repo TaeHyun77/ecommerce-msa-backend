@@ -31,7 +31,13 @@ public class Order {
     private Long memberId;
 
     @Column(nullable = false)
-    private Integer totalAmount; // 주문 총액 (원)
+    private Integer totalAmount; // 할인 전 상품 합계 (원)
+
+    // promotion-service의 회원 쿠폰을 직접 참조하지 않고 식별자만 보관 - 쿠폰을 쓰지 않은 주문은 null
+    private Long memberCouponId;
+
+    @Column(nullable = false)
+    private Integer discountAmount; // 쿠폰 할인액 (원)
 
     // 엔티티 UPDATE에서 제외 - 상태는 OrderRepository의 조건부 UPDATE로만 변경
     @Enumerated(EnumType.STRING)
@@ -66,6 +72,7 @@ public class Order {
         this.orderNo = UUID.randomUUID().toString();
         this.memberId = memberId;
         this.totalAmount = 0;
+        this.discountAmount = 0;
         this.status = OrderStatus.PAYMENT_WAITING;
         this.orderedAt = orderedAt;
         this.expiresAt = expiresAt;
@@ -74,6 +81,28 @@ public class Order {
     public void addLine(Long productId, String productName, Integer unitPrice, Integer quantity) {
         lines.add(new OrderLine(this, productId, productName, unitPrice, quantity));
         this.totalAmount += unitPrice * quantity;
+    }
+
+    // 할인액은 상품 합계를 기준으로 계산되므로 품목을 모두 담은 뒤 호출해야 함
+    public void applyCoupon(Long memberCouponId, int discountAmount) {
+        if (memberCouponId == null) {
+            throw new IllegalArgumentException("쿠폰은 필수입니다.");
+        }
+        if (discountAmount < 0 || discountAmount > totalAmount) { // 결제 금액이 음수가 되지 않도록 방어
+            throw new IllegalArgumentException("할인액은 0원 이상, 상품 합계 이하여야 합니다.");
+        }
+
+        this.memberCouponId = memberCouponId;
+        this.discountAmount = discountAmount;
+    }
+
+    public boolean hasCoupon() {
+        return memberCouponId != null;
+    }
+
+    // 실제 청구 금액 - 토스 결제 요청과 승인에 쓰는 금액 (원)
+    public int getPaymentAmount() {
+        return totalAmount - discountAmount;
     }
 
     // 결제창에 표시할 주문명 - 토스페이먼츠 결제 요청의 orderName으로 사용

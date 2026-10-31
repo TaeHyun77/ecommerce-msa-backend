@@ -20,32 +20,26 @@ import java.util.List;
 public class OrderService {
     private final OrderRepository orderRepository;
 
-    // 특정 사용자의 주문 목록 조회
+    // 주문 목록 조회
     public List<OrderResponse> getOrdersByMemberId(Long memberId) {
         return orderRepository.findAllByMemberIdOrderByOrderedAtDesc(memberId).stream()
                 .map(OrderResponse::from)
                 .toList();
     }
 
-    // 내 주문 목록 조회 - 최근 주문부터
+    // 주문 목록 조회
     public List<OrderSummaryResponse> getOrderSummaries(Long memberId) {
         return orderRepository.findAllWithLinesByMemberIdOrderByOrderedAtDesc(memberId).stream()
                 .map(OrderSummaryResponse::from)
                 .toList();
     }
 
-    // 주문 조회
-    // 다른 회원의 주문은 존재 여부도 드러내지 않도록 없는 주문과 같은 404로 응답
+    // 단건 상세 주문 조회
     public OrderDetailResponse getOrder(Long memberId, String orderNo) {
         Order order = orderRepository.findByOrderNoAndMemberId(orderNo, memberId)
                 .orElseThrow(() -> new OrderException(OrderErrorCode.ORDER_NOT_FOUND));
 
         return OrderDetailResponse.from(order);
-    }
-
-    @Transactional
-    public void fail(String orderNo) {
-        orderRepository.failPaymentWaiting(orderNo);
     }
 
     // 승인 중으로 바꾼 뒤 바로 커밋하여, 이후 원격 호출 중에 서버가 멈춰도 복구 스케줄러가 이 주문을 찾을 수 있도록 함

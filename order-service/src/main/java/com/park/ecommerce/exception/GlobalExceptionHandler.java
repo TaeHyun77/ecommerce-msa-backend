@@ -44,7 +44,9 @@ public class GlobalExceptionHandler {
     // 서킷이 열려 호출이 차단된 경우 - 대상 서비스 장애와 같은 의미이므로 동일한 503으로 응답
     @ExceptionHandler(CallNotPermittedException.class)
     public ResponseEntity<ErrorResponse> handleCallNotPermitted(CallNotPermittedException e) {
-        OrderErrorCode errorCode = OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE;
+        OrderErrorCode errorCode = "promotionService".equals(e.getCausingCircuitBreakerName())
+                ? OrderErrorCode.PROMOTION_SERVICE_UNAVAILABLE
+                : OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE;
         return ResponseEntity.status(errorCode.getStatus()).body(ErrorResponse.from(errorCode));
     }
 }

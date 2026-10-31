@@ -38,7 +38,7 @@ public class OrderController {
         return orderService.getOrderSummaries(memberId);
     }
 
-    // 단건 주문 조회 - 상세 정보 ( 결제 정보 포함 )
+    // 단건 상세 주문 조회 ( 결제 정보 포함 )
     @GetMapping("/{orderNo}")
     public OrderDetailResponse getOrder(
             @RequestHeader(MEMBER_ID_HEADER) Long memberId,

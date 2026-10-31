@@ -11,7 +11,9 @@ public record OrderDetailResponse(
         String orderNo,
         OrderStatus status,
         String orderName,
-        Integer totalAmount,
+        Integer totalAmount, // 할인 전 상품 합계 (원)
+        Integer discountAmount, // 쿠폰 할인액 (원)
+        Integer paymentAmount, // 결제 금액 (원)
         LocalDateTime orderedAt,
         LocalDateTime expiresAt,
         List<Line> lines,
@@ -32,6 +34,8 @@ public record OrderDetailResponse(
                 order.getStatus(),
                 order.getOrderName(),
                 order.getTotalAmount(),
+                order.getDiscountAmount(),
+                order.getPaymentAmount(),
                 order.getOrderedAt(),
                 order.getExpiresAt(),
                 lines,
@@ -43,7 +47,7 @@ public record OrderDetailResponse(
         if (payment == null) return this;
 
         return new OrderDetailResponse(
-                orderNo, status, orderName, totalAmount, orderedAt, expiresAt, lines,
+                orderNo, status, orderName, totalAmount, discountAmount, paymentAmount, orderedAt, expiresAt, lines,
                 new Payment(payment.status(), payment.amount(), payment.method(), payment.approvedAt())
         );
     }

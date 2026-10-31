@@ -64,7 +64,7 @@ public class OrderApprovalRecoveryScheduler {
     }
 
     // 상한까지 확정되지 않은 주문은 이미 승인됐을 수 있어 자동으로 실패 처리하지 않고, 토스에서 결제 상태를 확인해 수동으로 처리하도록 알림
-    // 선점이 확정된 채로 남아 재고가 묶여 있으므로 수동 처리 때 선점 해제도 함께 해야 함
+    // 선점이 확정된 채로 남아 재고와 쿠폰이 묶여 있으므로 수동 처리 때 재고 선점과 쿠폰 해제도 함께 해야 함
     private void reportGivenUpApprovals() {
         List<String> orderNos = orderRepository.findGivenUpApprovingOrderNos(
                 LocalDateTime.now().minus(giveUpAfter), PageRequest.of(0, BATCH_SIZE)

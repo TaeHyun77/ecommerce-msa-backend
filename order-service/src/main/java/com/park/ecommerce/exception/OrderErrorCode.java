@@ -19,7 +19,11 @@ public enum OrderErrorCode {
     PAYMENT_AMOUNT_MISMATCH(HttpStatus.BAD_REQUEST, "결제 금액이 주문 금액과 다릅니다."),
     PAYMENT_IN_PROGRESS(HttpStatus.CONFLICT, "결제를 처리하고 있습니다. 잠시 후 주문 상태를 확인해주세요."),
     PAYMENT_FAILED(HttpStatus.CONFLICT, "결제가 승인되지 않았습니다. 다시 주문해주세요."),
-    PRODUCT_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "상품 정보를 가져오지 못했습니다. 잠시 후 다시 시도해주세요.");
+    COUPON_NOT_FOUND(HttpStatus.NOT_FOUND, "보유한 쿠폰을 찾을 수 없습니다."),
+    COUPON_NOT_IN_USE_PERIOD(HttpStatus.BAD_REQUEST, "쿠폰 사용 기간이 아닙니다."),
+    COUPON_NOT_AVAILABLE(HttpStatus.CONFLICT, "다른 주문에 사용 중이거나 이미 사용한 쿠폰입니다."),
+    PRODUCT_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "상품 정보를 가져오지 못했습니다. 잠시 후 다시 시도해주세요."),
+    PROMOTION_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "쿠폰 정보를 가져오지 못했습니다. 잠시 후 다시 시도해주세요.");
 
     private final HttpStatus status;
     private final String message;

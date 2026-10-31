@@ -139,6 +139,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ecommerce_order?useUnicode=true&serverTimezone=Asia/Seoul
       EXTERNAL_PRODUCTSERVICE_BASEURL: http://product-service:8081
       EXTERNAL_PAYMENTSERVICE_BASEURL: http://payment-service:8084
+      EXTERNAL_PROMOTIONSERVICE_BASEURL: http://promotion-service:8087
     depends_on:
       mysql: { condition: service_healthy }
 

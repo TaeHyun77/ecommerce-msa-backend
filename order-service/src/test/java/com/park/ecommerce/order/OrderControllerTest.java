@@ -51,9 +51,9 @@ class OrderControllerTest {
     @Test
     @DisplayName("주문하면 201과 결제창에 필요한 주문번호·주문명·금액·결제 기한을 응답한다")
     void createsOrder() throws Exception {
-        OrderCreateRequest request = new OrderCreateRequest(List.of(new OrderCreateRequest.Item(1L, 2)));
+        OrderCreateRequest request = new OrderCreateRequest(List.of(new OrderCreateRequest.Item(1L, 2)), null);
         given(orderPlacementService.place(1L, request))
-                .willReturn(new OrderCreateResponse("ORDER-0001", "유기농 우유 900ml", 7_800, EXPIRES_AT));
+                .willReturn(new OrderCreateResponse("ORDER-0001", "유기농 우유 900ml", 7_800, EXPIRES_AT, OrderStatus.PAYMENT_WAITING));
 
         mockMvc.perform(post("/api/orders")
                         .header(MEMBER_ID_HEADER, 1L)
@@ -63,7 +63,25 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.orderNo").value("ORDER-0001"))
                 .andExpect(jsonPath("$.orderName").value("유기농 우유 900ml"))
                 .andExpect(jsonPath("$.amount").value(7_800))
-                .andExpect(jsonPath("$.expiresAt").value("2026-09-22T12:10:00"));
+                .andExpect(jsonPath("$.expiresAt").value("2026-09-22T12:10:00"))
+                .andExpect(jsonPath("$.status").value("PAYMENT_WAITING"));
+    }
+
+    @Test
+    @DisplayName("쿠폰을 지정해 주문하면 회원 쿠폰 식별자를 함께 넘긴다")
+    void createsOrderWithCoupon() throws Exception {
+        OrderCreateRequest request = new OrderCreateRequest(List.of(new OrderCreateRequest.Item(1L, 2)), 10L);
+        given(orderPlacementService.place(1L, request))
+                .willReturn(new OrderCreateResponse("ORDER-0001", "유기농 우유 900ml", 5_800, EXPIRES_AT, OrderStatus.PAYMENT_WAITING));
+
+        mockMvc.perform(post("/api/orders")
+                        .header(MEMBER_ID_HEADER, 1L)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "items": [ { "productId": 1, "quantity": 2 } ], "memberCouponId": 10 }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.amount").value(5_800));
     }
 
     @Test
@@ -102,7 +120,7 @@ class OrderControllerTest {
     @DisplayName("주문을 조회하면 200과 주문 상태·품목을 응답한다")
     void getsOrder() throws Exception {
         given(orderPaymentService.getOrder(1L, "ORDER-0001")).willReturn(new OrderDetailResponse(
-                "ORDER-0001", OrderStatus.PAYMENT_WAITING, "유기농 우유 900ml", 7_800, EXPIRES_AT.minusMinutes(10), EXPIRES_AT,
+                "ORDER-0001", OrderStatus.PAYMENT_WAITING, "유기농 우유 900ml", 7_800, 0, 7_800, EXPIRES_AT.minusMinutes(10), EXPIRES_AT,
                 List.of(new OrderDetailResponse.Line(1L, "유기농 우유 900ml", 3_900, 2)), null
         ));
 
@@ -117,7 +135,7 @@ class OrderControllerTest {
     @DisplayName("결제된 주문을 조회하면 결제 정보도 응답한다")
     void getsPaidOrderWithPayment() throws Exception {
         given(orderPaymentService.getOrder(1L, "ORDER-0001")).willReturn(new OrderDetailResponse(
-                "ORDER-0001", OrderStatus.PAID, "유기농 우유 900ml", 7_800, EXPIRES_AT.minusMinutes(10), EXPIRES_AT,
+                "ORDER-0001", OrderStatus.PAID, "유기농 우유 900ml", 7_800, 0, 7_800, EXPIRES_AT.minusMinutes(10), EXPIRES_AT,
                 List.of(new OrderDetailResponse.Line(1L, "유기농 우유 900ml", 3_900, 2)),
                 new OrderDetailResponse.Payment("DONE", 7_800, "카드", EXPIRES_AT.minusMinutes(5))
         ));
