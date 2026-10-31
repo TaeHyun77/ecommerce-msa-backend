@@ -31,5 +31,3 @@ Test : JUnit 5, Testcontainers<br><br>
 [ 쿠폰 미적용 시 ]
 
 주문 요청 → 재고 선점 → 주문 생성 → 결제 인증 → 재고 선점 확정 → PG 승인 → 결제 완료<br><br>
-
-<img width="2000" height="1200" alt="image" src="https://github.com/user-attachments/assets/13928763-b52f-4215-ab9f-56d0a082f5db" />
