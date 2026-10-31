@@ -15,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 
-// 회원 쿠폰의 발급, 조회, 주문 사용(선점 → 확정 → 해제)
+// 회원 쿠폰의 발급, 조회, 주문 사용 (선점 → 확정 → 해제)
 // 발급은 선착순 수량을 Redis가 나눠 준 발급 번호를 유니크 제약으로 확인하므로 반드시 CouponIssueFacade를 거쳐 호출 - 직접 부르면 번호 분배와 반납을 건너뜀
 @Service
 @RequiredArgsConstructor
@@ -63,12 +63,18 @@ public class CouponService {
 
     // 주문 생성 시 쿠폰을 주문에 선점
     // 사용 기간은 선점 시점에만 확인 - 이후로는 선점 만료(결제 기한)가 지켜, 결제 중 사용 기간이 끝나도 이 주문에는 쓸 수 있음
+    // 같은 주문번호의 동시 요청에 진 쪽은 COUPON_NOT_AVAILABLE로 끝나고, CouponReservationFacade가 새 트랜잭션으로 다시 확인함
     @Transactional
     public CouponReserveResponse reserve(CouponReserveRequest request) {
         MemberCoupon memberCoupon = memberCouponRepository.findWithCouponByIdAndMemberId(request.memberCouponId(), request.memberId())
                 .orElseThrow(() -> new CouponException(CouponErrorCode.MEMBER_COUPON_NOT_FOUND));
 
         Coupon coupon = memberCoupon.getCoupon();
+
+        // 이미 선점한 주문의 재요청은 사용 기간과 관계없이 기존 할인액으로 응답
+        if (request.orderNo().equals(memberCoupon.getOrderNo())) {
+            return new CouponReserveResponse(coupon.getDiscount().calculateAmount(request.orderAmount()));
+        }
         if (!coupon.isInUsePeriod(LocalDateTime.now())) { // 사용 기간 유효성 확인
             throw new CouponException(CouponErrorCode.NOT_IN_USE_PERIOD);
         }

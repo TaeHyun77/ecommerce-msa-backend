@@ -96,18 +96,16 @@ class StockReservationServiceTest {
     }
 
     @Test
-    @DisplayName("같은 주문번호로 다시 선점하면 거절되고 재고는 한 번만 줄어든다")
-    void rejectsSameOrderNo() {
+    @DisplayName("같은 주문번호로 다시 선점하면 성공으로 끝나고 재고는 한 번만 줄어든다 - 결과를 모르는 order-service의 재요청")
+    void reservesOnceForSameOrderNo() {
         Long productId = productWithStock(10);
         String orderNo = newOrderNo();
         stockReservationService.reserve(request(orderNo, inTenMinutes(), item(productId, 3)));
 
-        assertThatThrownBy(() -> stockReservationService.reserve(request(orderNo, inTenMinutes(), item(productId, 3))))
-                .isInstanceOf(ReservationException.class)
-                .extracting("errorCode")
-                .isEqualTo(ReservationErrorCode.RESERVATION_ALREADY_EXISTS);
+        stockReservationService.reserve(request(orderNo, inTenMinutes(), item(productId, 3)));
 
         assertThat(stockOf(productId)).isEqualTo(7);
+        assertThat(statusOf(orderNo)).isEqualTo(StockReservationStatus.RESERVED);
     }
 
     @Test

@@ -22,14 +22,14 @@ public class StockReservationService {
     private final ProductService productService;
 
     // 재고 선점
+    // 같은 주문번호로 이미 선점돼 있으면 성공으로 끝냄 - 결과를 모르는 order-service가 같은 요청을 다시 보내도 재고는 한 번만 차감
+    // 같은 주문번호가 동시에 들어오면 늦은 쪽은 선점 내역 저장에서 유니크 제약에 막히고, StockReservationFacade가 성공으로 응답
     @Transactional
     public void reserve(StockReservationRequest request) {
-        // 동일 주문번호의 동시 요청은 유니크 제약으로 중복 저장이 방지되어 재고가 한 번만 차감되도록 함
         if (stockReservationRepository.existsByOrderNo(request.orderNo())) {
-            throw new ReservationException(ReservationErrorCode.RESERVATION_ALREADY_EXISTS);
+            log.debug("[재고 선점] 이미 선점된 주문 orderNo={}", request.orderNo());
+            return;
         }
-
-        productService.decreaseStocks(request.quantities()); // 재고 차감
 
         // 특정 주문에 대한 선점 내역 저장
         StockReservation reservation = StockReservation.builder()
@@ -39,7 +39,12 @@ public class StockReservationService {
 
         // 선점 내역에 대한 상품들 정보
         request.items().forEach(item -> reservation.addLine(item.productId(), item.quantity()));
-        stockReservationRepository.save(reservation);
+
+        // 재고 차감보다 먼저 저장 - 같은 주문번호의 동시 요청이 유니크 키에서 먼저 온 요청의 커밋을 기다리게 해,
+        // 먼저 온 요청이 가져간 재고 때문에 늦은 요청이 재고 부족으로 잘못 거절되지 않도록 함
+        stockReservationRepository.saveAndFlush(reservation);
+
+        productService.decreaseStocks(request.quantities()); // 재고 차감
 
         log.debug("[재고 선점] 선점 완료 orderNo={}, 만료 시각={}", request.orderNo(), request.expiresAt());
     }

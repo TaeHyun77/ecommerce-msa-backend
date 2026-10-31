@@ -12,18 +12,19 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 // 게이트웨이가 외부로 노출하지 않는 서비스 간 내부 통신 전용 API - order-service가 주문/결제 흐름에서 호출함
-// 확정과 해제는 이미 처리된 요청이 다시 와도 같은 응답을 준다 - 결과를 모르는 order-service가 안전하게 재요청할 수 있도록
+// 선점,확정,해제는 멱등적으로 동작
 @RestController
 @RequestMapping("/internal/stock-reservations")
 @RequiredArgsConstructor
 public class StockReservationController {
+    private final StockReservationFacade stockReservationFacade;
     private final StockReservationService stockReservationService;
 
     // 선점
     @PostMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void reserve(@Valid @RequestBody StockReservationRequest request) {
-        stockReservationService.reserve(request);
+        stockReservationFacade.reserve(request);
     }
 
     // confirm으로 상태 변경

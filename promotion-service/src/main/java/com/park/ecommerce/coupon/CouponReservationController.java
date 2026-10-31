@@ -17,12 +17,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/internal/coupon-reservations")
 @RequiredArgsConstructor
 public class CouponReservationController {
+    private final CouponReservationFacade couponReservationFacade;
     private final CouponService couponService;
 
-    // 선점 - 주문에 적용할 할인액을 응답
+    // 선점 - 주문에 적용할 할인액을 응답, 같은 주문번호로 다시 요청해도 같은 할인액으로 응답
     @PostMapping
     public CouponReserveResponse reserve(@Valid @RequestBody CouponReserveRequest request) {
-        return couponService.reserve(request);
+        return couponReservationFacade.reserve(request);
     }
 
     // 쿠폰 적용 확정
