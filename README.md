@@ -20,7 +20,7 @@ Test : JUnit 5, Testcontainers<br><br>
 
 ### 아키텍처
 ---
-<img width="1578" height="712" alt="ㅁㄴㅇ" src="https://github.com/user-attachments/assets/1c476469-4c1a-4f18-9242-3e65f28e8556" /><br><br>
+<img width="2000" height="1079" alt="image" src="https://github.com/user-attachments/assets/0149a2d2-fd7a-4c58-95c1-b643a12b40e9" /><br><br>
 
 **결제 과정**
 
@@ -32,4 +32,4 @@ Test : JUnit 5, Testcontainers<br><br>
 
 주문 요청 → 재고 선점 → 주문 생성 → 결제 인증 → 재고 선점 확정 → PG 승인 → 결제 완료<br><br>
 
-<img width="919" height="648" alt="결제" src="https://github.com/user-attachments/assets/762d92bc-c59d-4eb7-91c0-a95adf3c9f04" />
+<img width="2000" height="1200" alt="image" src="https://github.com/user-attachments/assets/13928763-b52f-4215-ab9f-56d0a082f5db" />
