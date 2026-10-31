@@ -51,6 +51,9 @@ class StockReservationConcurrencyTest {
     private StockReservationService stockReservationService;
 
     @Autowired
+    private StockReservationFacade stockReservationFacade;
+
+    @Autowired
     private StockReservationRepository stockReservationRepository;
 
     @Autowired
@@ -80,6 +83,25 @@ class StockReservationConcurrencyTest {
                         .extracting("errorCode")
                         .isEqualTo(ProductErrorCode.INSUFFICIENT_STOCK));
         assertThat(stockOf(productId)).isZero();
+    }
+
+    @Test
+    @DisplayName("같은 주문번호의 선점이 동시에 들어와도 모두 성공하고 재고는 한 번만 줄어든다 - 원래 요청과 재시도가 겹친 경우")
+    void reservesOnceForSameOrderNoConcurrently() throws InterruptedException {
+        for (int i = 0; i < 20; i++) {
+            // 재고를 주문 수량과 같게 두어, 늦은 요청이 재고 부족으로 판정되면 실패하도록 함
+            Long productId = productWithStock(1);
+            String orderNo = UUID.randomUUID().toString();
+
+            List<Throwable> errors = runConcurrently(List.of(
+                    () -> stockReservationFacade.reserve(request(orderNo, productId)),
+                    () -> stockReservationFacade.reserve(request(orderNo, productId))
+            ));
+
+            assertThat(errors).isEmpty();
+            assertThat(stockOf(productId)).isZero();
+            assertThat(statusOf(orderNo)).isEqualTo(StockReservationStatus.RESERVED);
+        }
     }
 
     @Test

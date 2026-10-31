@@ -22,6 +22,9 @@ class StockReservationControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
+    private StockReservationFacade stockReservationFacade;
+
+    @MockitoBean
     private StockReservationService stockReservationService;
 
     // 메인 클래스의 @EnableJpaAuditing이 웹 슬라이스 테스트에서도 JPA 메타모델을 요구하므로 대체

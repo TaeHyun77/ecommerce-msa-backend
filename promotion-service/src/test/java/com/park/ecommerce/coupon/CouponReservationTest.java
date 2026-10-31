@@ -54,6 +54,9 @@ class CouponReservationTest {
     private CouponService couponService;
 
     @Autowired
+    private CouponReservationFacade couponReservationFacade;
+
+    @Autowired
     private CouponRepository couponRepository;
 
     @Autowired
@@ -113,6 +116,52 @@ class CouponReservationTest {
     }
 
     @Test
+    @DisplayName("같은 주문번호로 다시 선점하면 같은 할인액으로 성공한다 - 결과를 모르는 order-service의 재요청")
+    void reserve_sameOrderNo() {
+        MemberCoupon memberCoupon = issue(saveCoupon(DiscountType.AMOUNT, 1_000, LocalDateTime.now().minusDays(1)), 1L);
+        String orderNo = newOrderNo();
+        couponService.reserve(request(memberCoupon, 1L, orderNo));
+
+        int discountAmount = couponService.reserve(request(memberCoupon, 1L, orderNo)).discountAmount();
+
+        MemberCoupon reserved = memberCouponRepository.findById(memberCoupon.getId()).orElseThrow();
+        assertThat(discountAmount).isEqualTo(1_000);
+        assertThat(reserved.getStatus()).isEqualTo(MemberCouponStatus.RESERVED);
+        assertThat(reserved.getOrderNo()).isEqualTo(orderNo);
+    }
+
+    @Test
+    @DisplayName("같은 주문번호의 선점이 동시에 들어와도 모두 같은 할인액으로 성공한다 - 원래 요청과 재시도가 겹친 경우")
+    void reserve_concurrentSameOrderNo() throws Exception {
+        for (int i = 0; i < 20; i++) {
+            MemberCoupon memberCoupon = issue(saveCoupon(DiscountType.AMOUNT, 1_000, LocalDateTime.now().minusDays(1)), 1L);
+            String orderNo = newOrderNo();
+            CountDownLatch start = new CountDownLatch(1);
+
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            try {
+                List<CompletableFuture<Integer>> futures = IntStream.range(0, 2)
+                        .mapToObj(n -> CompletableFuture.supplyAsync(() -> {
+                            try {
+                                start.await();
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IllegalStateException(e);
+                            }
+                            return couponReservationFacade.reserve(request(memberCoupon, 1L, orderNo)).discountAmount();
+                        }, executor))
+                        .toList();
+                start.countDown();
+
+                assertThat(futures).allSatisfy(future -> assertThat(future.get()).isEqualTo(1_000));
+            } finally {
+                executor.shutdown();
+            }
+            assertThat(memberCouponRepository.findById(memberCoupon.getId()).orElseThrow().getOrderNo()).isEqualTo(orderNo);
+        }
+    }
+
+    @Test
     @DisplayName("같은 쿠폰으로 동시에 주문해도 한 주문만 선점한다")
     void reserve_concurrent() throws Exception {
         int requestCount = 20;
@@ -127,7 +176,7 @@ class CouponReservationTest {
                     .mapToObj(i -> CompletableFuture.runAsync(() -> {
                         try {
                             start.await();
-                            couponService.reserve(request(memberCoupon, 1L, newOrderNo()));
+                            couponReservationFacade.reserve(request(memberCoupon, 1L, newOrderNo()));
                             succeeded.incrementAndGet();
                         } catch (CouponException e) {
                             if (e.getErrorCode() == CouponErrorCode.COUPON_NOT_AVAILABLE) rejected.incrementAndGet();
