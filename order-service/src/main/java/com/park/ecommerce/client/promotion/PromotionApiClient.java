@@ -6,6 +6,7 @@ import com.park.ecommerce.exception.OrderErrorCode;
 import com.park.ecommerce.exception.OrderException;
 import com.park.ecommerce.exception.PromotionServiceUnavailableException;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -18,8 +19,8 @@ import org.springframework.web.client.RestClient;
 public class PromotionApiClient {
     private final RestClient promotionServiceRestClient;
 
-    // 쿠폰을 주문에 선점하고 할인액(원)을 돌려줌
-    // 새 주문번호와 검증된 값으로만 호출하므로 4xx는 쿠폰 상태를 뜻한다 - 호출별 처리가 공통 4xx 처리(계약 불일치)보다 먼저 적용됨
+    // 쿠폰 선점 후 할인액을 반환하며, 4xx는 쿠폰 상태 오류로 처리하고 결과 불명 시 같은 주문번호로 재시도
+    @Retry(name = "couponReservation")
     public int reserveCoupon(CouponReservationRequest request) {
         try {
             return promotionServiceRestClient.post()

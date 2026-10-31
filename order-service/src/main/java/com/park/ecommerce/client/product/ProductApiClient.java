@@ -6,6 +6,7 @@ import com.park.ecommerce.exception.ProductServiceUnavailableException;
 import com.park.ecommerce.client.product.dto.ProductSummaryResponse;
 import com.park.ecommerce.client.product.dto.StockReservationRequest;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
@@ -38,13 +39,15 @@ public class ProductApiClient {
     }
 
     // 한 상품이라도 재고가 부족하면 product-service가 전체를 롤백하고 409로 응답
+    // 결과를 모르면 (타임아웃, 5xx) 같은 주문번호로 한 번 더 요청 - product-service가 같은 주문의 선점을 성공으로 응답하므로, 첫 요청이 실제로 선점했어도 재고는 한 번만 차감됨
+    @Retry(name = "stockReservation")
     public void reserve(StockReservationRequest request) {
         try {
             productServiceRestClient.post()
                     .uri("/internal/stock-reservations")
                     .body(request)
                     .retrieve()
-                    // 새 주문번호로만 호출하므로 409는 재고 부족을 뜻한다 - 호출별 처리가 공통 4xx 처리(계약 불일치)보다 먼저 적용됨
+                    // 같은 주문번호의 재요청은 성공으로 응답되므로 409는 재고 부족을 뜻한다 - 호출별 처리가 공통 4xx 처리(계약 불일치)보다 먼저 적용됨
                     .onStatus(status -> status.value() == HttpStatus.CONFLICT.value(), (req, res) -> {
                         throw new OrderException(OrderErrorCode.INSUFFICIENT_STOCK);
                     })
