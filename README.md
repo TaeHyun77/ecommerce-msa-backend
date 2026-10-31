@@ -20,7 +20,7 @@ Test : JUnit 5, Testcontainers<br><br>
 
 ### 아키텍처
 ---
-<img width="2000" height="1079" alt="image" src="https://github.com/user-attachments/assets/0149a2d2-fd7a-4c58-95c1-b643a12b40e9" /><br><br>
+<img width="2216" height="1320" alt="image" src="https://github.com/user-attachments/assets/6f3ea9ea-633c-4d8d-be20-963bfda8289a" /><br><br>
 
 **결제 과정**
 
