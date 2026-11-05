@@ -24,6 +24,9 @@ Test : JUnit 5, Testcontainers<br><br>
 
 **결제 과정**
 
+<img width="1838" height="1296" alt="image" src="https://github.com/user-attachments/assets/ac92ddad-ec76-4f5f-95ae-3e35353450ce" />
+
+
 [ 요약 ]
 
 주문 요청 → (쿠폰 선점) & 재고 선점 & 주문 생성 → 결제 인증 → 재고 선점 확정 & (쿠폰 사용 확정) & PG 승인 → 결제 완료<br><br>
