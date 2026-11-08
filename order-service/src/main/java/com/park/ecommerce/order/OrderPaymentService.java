@@ -21,7 +21,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-// 2. 재고 선점 확정 → 쿠폰 확정 → 결제 승인 처리 (payment-service)
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -33,7 +32,7 @@ public class OrderPaymentService {
     private final PromotionApiClient promotionApiClient;
 
     // 주문 상세 조회 ( 결제 정보 포함 )
-    public OrderDetailResponse getOrder(Long memberId, String orderNo) {
+    public OrderDetailResponse getOrderWithPayment(Long memberId, String orderNo) {
         OrderDetailResponse order = orderService.getOrder(memberId, orderNo);
         if (order.status() == OrderStatus.PAYMENT_WAITING || order.status() == OrderStatus.APPROVING) { // 결제 안된 주문은 단순히 주문 정보만 반환
             return order;
@@ -43,7 +42,6 @@ public class OrderPaymentService {
     }
 
     // 주문에 대한 결제 정보 조회
-    // 결제 정보를 가져오지 못해도 주문 상태는 응답하도록 함 - 클라이언트는 승인 중인 주문의 최종 상태를 주문 조회로 확인하므로 결제 정보 때문에 조회까지 실패하면 안 됨
     private PaymentResponse findPayment(String orderNo) {
         try {
             return paymentApiClient.findPayment(orderNo).orElse(null);
@@ -53,45 +51,35 @@ public class OrderPaymentService {
         }
     }
 
-    // 주문 검증 및 APPROVING로 전환
-    public OrderPaymentResponse approve(Long memberId, String orderNo, OrderPaymentRequest request) {
+    // 주문 결제 승인 (주문 검증 및 APPROVING로 전환)
+    public OrderPaymentResponse approvePayment(Long memberId, String orderNo, OrderPaymentRequest request) {
         Order order = findOwnOrder(memberId, orderNo);
 
-        // 가격 검증 - 토스 연동 가이드 필수 항목
-        if (order.getPaymentAmount() != request.amount()) {
+        if (order.getPaymentAmount() != request.amount()) { // 가격 검증 - 토스 연동 가이드 필수 항목
             throw new OrderException(OrderErrorCode.PAYMENT_AMOUNT_MISMATCH);
         }
 
-        // 주문 상태를 APPROVING으로 전환 - 성공한 요청만 결제를 진행하고, 실패하면 현재 상태에 맞게 응답
+        // 주문 상태를 APPROVING으로 전환
         if (!orderService.startApproval(orderNo, request.paymentKey())) {
-            return rejectNotPayable(findOwnOrder(memberId, orderNo));
+            return respondToNotPayable(findOwnOrder(memberId, orderNo));
         }
 
-        return toResponse(orderNo, proceedApproval(order, request.paymentKey()));
-    }
-
-    // 결제 금액이 0원인 주문 - 토스 결제창을 띄울 수 없어 주문 생성 직후 PG 승인 없이 선점만 확정
-    public OrderPaymentResponse approveWithoutPayment(Order order) {
-        if (!orderService.startApproval(order.getOrderNo(), null)) {
-            throw new OrderException(OrderErrorCode.ORDER_EXPIRED);
-        }
-        return toResponse(order.getOrderNo(), proceedApproval(order, null));
+        return toResponse(orderNo, processApproval(order, request.paymentKey(), ApprovalTrigger.USER));
     }
 
     // 승인 처리
-    private ApprovalOutcome proceedApproval(Order order, String paymentKey) {
+    private ApprovalOutcome processApproval(Order order, String paymentKey, ApprovalTrigger trigger) {
         String orderNo = order.getOrderNo();
         try {
-            // 1. PG 승인 전에 선점을 확정 - 선점이 만료된 주문은 청구 전에 막고, 확정된 선점은 더 이상 만료되지 않음
+            // 1. 재고 선점 확정
             if (!productApiClient.confirmReservation(orderNo)) {
                 orderService.failApproving(orderNo);
                 log.debug("[결제] 재고 선점 만료로 주문 실패 처리 orderNo={}", orderNo);
                 return ApprovalOutcome.RESERVATION_EXPIRED;
             }
 
-            // 2. 쿠폰 확정 - 재고와 결제 기한이 같지만 두 확정 사이에 기한이 지날 수 있음
+            // 2. 쿠폰 선점 확정
             if (order.hasCoupon() && !promotionApiClient.confirmCoupon(orderNo)) {
-                // 확정된 재고 선점은 만료 해제 대상이 아니므로 직접 해제해야 재고가 돌아옴
                 productApiClient.releaseReservation(orderNo);
                 orderService.failApproving(orderNo);
                 log.debug("[결제] 쿠폰 선점 만료로 재고 선점 해제 후 주문 실패 처리 orderNo={}", orderNo);
@@ -99,8 +87,17 @@ public class OrderPaymentService {
             }
 
             // 3. 승인 요청 - 0원 주문은 청구할 금액이 없어 PG 승인을 생략
-            if (order.getPaymentAmount() == 0
-                    || paymentApiClient.approve(new PaymentApproveRequest(orderNo, paymentKey, order.getPaymentAmount())).isDone()) {
+            boolean approved;
+            try {
+                approved = order.getPaymentAmount() == 0
+                        || paymentApiClient.approve(new PaymentApproveRequest(orderNo, paymentKey, order.getPaymentAmount())).isDone();
+            } catch (CallNotPermittedException e) {
+                // 복구 중이면 이전 승인 요청이 이미 결제됐을 수 있어 실패로 확정하지 않음 - 바깥 catch에서 결과 불명으로 남김
+                if (trigger == ApprovalTrigger.RECOVERY) throw e;
+                return failWithoutApproval(order);
+            }
+
+            if (approved) {
                 orderService.markPaid(orderNo);
                 log.debug("[결제] 결제 완료 orderNo={}", orderNo);
                 return ApprovalOutcome.PAID;
@@ -113,6 +110,9 @@ public class OrderPaymentService {
             orderService.failApproving(orderNo);
             log.debug("[결제] 결제 거절로 선점 해제 후 주문 실패 처리 orderNo={}", orderNo);
             return ApprovalOutcome.PAYMENT_FAILED;
+
+        // 타임 아웃과 같은 결과 불명 시, UNKNOWN으로 상태 변경하고 재시도 대상으로 됨
+        // 재고, 쿠폰 확정 중 서킷 열림과 복구 중 payment-service 서킷 열림도 여기서 처리
         } catch (ProductServiceUnavailableException | PromotionServiceUnavailableException | CallNotPermittedException | PaymentResultUnknownException e) {
             log.warn("[결제] 결과 불명으로 승인 중 유지 orderNo={}, 사유={}", orderNo, e.getMessage());
             orderService.markApprovalUnknown(orderNo);
@@ -120,7 +120,40 @@ public class OrderPaymentService {
         }
     }
 
-    private OrderPaymentResponse rejectNotPayable(Order order) {
+    // 사용자 요청의 승인이 서킷 열림으로 나가지 못한 경우 - 이 주문의 첫 승인 요청이라 결제되지 않았음이 확실하므로 주문을 실패로 끝내고 선점을 해제
+    // 실패 처리를 해제보다 먼저 함 - 해제 도중 서버가 멈춰도 승인 중으로 남지 않아 복구가 실제 승인을 보내지 않음
+    // 해제에 실패해도 승인 중으로 되돌리지 않음 - 확정된 선점은 만료로 풀리지 않으므로 로그를 보고 수동으로 해제
+    private ApprovalOutcome failWithoutApproval(Order order) {
+        String orderNo = order.getOrderNo();
+        orderService.failApproving(orderNo);
+
+        // 승인 거절 처리와 같은 순서로 쿠폰을 먼저 해제
+        if (order.hasCoupon()) {
+            try {
+                promotionApiClient.releaseCoupon(orderNo);
+            } catch (RuntimeException e) {
+                log.error("[결제] 실패 처리한 주문의 쿠폰 해제 실패, 수동 해제 필요 orderNo={}, 사유={}", orderNo, e.getMessage());
+            }
+        }
+        try {
+            productApiClient.releaseReservation(orderNo);
+        } catch (RuntimeException e) {
+            log.error("[결제] 실패 처리한 주문의 재고 선점 해제 실패, 수동 해제 필요 orderNo={}, 사유={}", orderNo, e.getMessage());
+        }
+
+        log.warn("[결제] payment-service 서킷 열림으로 승인 요청 없이 주문 실패 처리 orderNo={}", orderNo);
+        return ApprovalOutcome.PAYMENT_SERVICE_UNAVAILABLE;
+    }
+
+    // 결제 금액이 0원인 주문 - 토스 결제창을 띄울 수 없어 주문 생성 직후 PG 승인 없이 선점만 확정
+    public OrderPaymentResponse approveFreeOrder(Order order) {
+        if (!orderService.startApproval(order.getOrderNo(), null)) {
+            throw new OrderException(OrderErrorCode.ORDER_EXPIRED);
+        }
+        return toResponse(order.getOrderNo(), processApproval(order, null, ApprovalTrigger.USER));
+    }
+
+    private OrderPaymentResponse respondToNotPayable(Order order) {
         // 이미 완료된 결제에 오류를 내지 않고 성공 결과를 응답
         if (order.getStatus() == OrderStatus.PAID) {
             return new OrderPaymentResponse(order.getOrderNo(), OrderStatus.PAID);
@@ -134,15 +167,15 @@ public class OrderPaymentService {
     }
 
     // 승인 중으로 멈춘 주문을 처음부터 다시 처리 - 재고·쿠폰 확정, 결제 승인, 해제가 모두 멱등이라 다시 실행해도 안전
-    public OrderStatus recover(String orderNo) {
+    public OrderStatus recoverApproval(String orderNo) {
         Order order = orderRepository.findByOrderNo(orderNo).orElseThrow();
         if (order.getStatus() != OrderStatus.APPROVING) {
             return order.getStatus();
         }
 
-        return switch (proceedApproval(order, order.getPaymentKey())) {
+        return switch (processApproval(order, order.getPaymentKey(), ApprovalTrigger.RECOVERY)) {
             case PAID -> OrderStatus.PAID;
-            case RESERVATION_EXPIRED, PAYMENT_FAILED -> OrderStatus.FAILED;
+            case RESERVATION_EXPIRED, PAYMENT_FAILED, PAYMENT_SERVICE_UNAVAILABLE -> OrderStatus.FAILED;
             case UNKNOWN -> OrderStatus.APPROVING;
         };
     }
@@ -158,6 +191,7 @@ public class OrderPaymentService {
             case PAID -> new OrderPaymentResponse(orderNo, OrderStatus.PAID);
             case RESERVATION_EXPIRED -> throw new OrderException(OrderErrorCode.ORDER_EXPIRED);
             case PAYMENT_FAILED -> throw new OrderException(OrderErrorCode.PAYMENT_FAILED);
+            case PAYMENT_SERVICE_UNAVAILABLE -> throw new OrderException(OrderErrorCode.PAYMENT_SERVICE_UNAVAILABLE);
             case UNKNOWN -> new OrderPaymentResponse(orderNo, OrderStatus.APPROVING); // 타임 아웃 등등
         };
     }
@@ -166,6 +200,13 @@ public class OrderPaymentService {
         PAID,
         RESERVATION_EXPIRED,
         PAYMENT_FAILED,
+        PAYMENT_SERVICE_UNAVAILABLE, // 서킷 열림으로 승인 요청을 보내지 못해 결제 없이 실패 처리한 경우
         UNKNOWN // 원격 호출 결과를 몰라 승인 중으로 남은 경우
+    }
+
+    // 승인을 누가 시작했는지 - 서킷 열림을 실패로 확정해도 되는지가 달라짐
+    private enum ApprovalTrigger {
+        USER, // startApproval 직후라 이 주문의 첫 승인 요청임이 보장됨
+        RECOVERY // 이전 승인 요청이 이미 payment-service에 도달했을 수 있음
     }
 }

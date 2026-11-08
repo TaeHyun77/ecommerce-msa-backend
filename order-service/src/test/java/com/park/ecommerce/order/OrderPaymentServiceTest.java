@@ -102,7 +102,7 @@ class OrderPaymentServiceTest {
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
         given(paymentApiClient.approve(any())).willReturn(done(orderNo));
 
-        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(AMOUNT));
+        OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(AMOUNT));
 
         assertThat(response.status()).isEqualTo(OrderStatus.PAID);
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.PAID);
@@ -120,7 +120,7 @@ class OrderPaymentServiceTest {
         given(promotionApiClient.confirmCoupon(orderNo)).willReturn(true);
         given(paymentApiClient.approve(any())).willReturn(done(orderNo));
 
-        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(DISCOUNTED_AMOUNT));
+        OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(DISCOUNTED_AMOUNT));
 
         assertThat(response.status()).isEqualTo(OrderStatus.PAID);
         InOrder inOrder = inOrder(productApiClient, promotionApiClient, paymentApiClient);
@@ -178,7 +178,7 @@ class OrderPaymentServiceTest {
         given(paymentApiClient.approve(any())).willReturn(failed(orderNo));
         willThrow(new PromotionServiceUnavailableException()).given(promotionApiClient).releaseCoupon(orderNo);
 
-        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(DISCOUNTED_AMOUNT));
+        OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(DISCOUNTED_AMOUNT));
 
         assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
         assertThat(approvalUnknownAtOf(orderNo)).isNotNull();
@@ -192,7 +192,7 @@ class OrderPaymentServiceTest {
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
         given(promotionApiClient.confirmCoupon(orderNo)).willThrow(new PromotionServiceUnavailableException());
 
-        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(DISCOUNTED_AMOUNT));
+        OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(DISCOUNTED_AMOUNT));
 
         assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
         assertThat(approvalUnknownAtOf(orderNo)).isNotNull();
@@ -231,7 +231,7 @@ class OrderPaymentServiceTest {
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
         given(paymentApiClient.approve(any())).willThrow(new PaymentResultUnknownException("payment-service 응답 status=503"));
 
-        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(AMOUNT));
+        OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(AMOUNT));
 
         assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
@@ -240,12 +240,46 @@ class OrderPaymentServiceTest {
     }
 
     @Test
+    @DisplayName("결제 승인 요청 때 서킷이 열려 있으면 주문을 실패 처리하고 쿠폰을 먼저 해제한 뒤 재고 선점을 해제한다 - 요청이 나가지 않아 결제되지 않음이 확실")
+    void failsAndReleasesWhenPaymentCircuitOpen() {
+        String orderNo = couponOrder();
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(promotionApiClient.confirmCoupon(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willThrow(paymentCircuitOpen());
+
+        assertRejected(orderNo, request(DISCOUNTED_AMOUNT), OrderErrorCode.PAYMENT_SERVICE_UNAVAILABLE);
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.FAILED);
+        assertThat(approvalUnknownAtOf(orderNo)).isNull();
+        InOrder inOrder = inOrder(promotionApiClient, productApiClient);
+        inOrder.verify(promotionApiClient).releaseCoupon(orderNo);
+        inOrder.verify(productApiClient).releaseReservation(orderNo);
+    }
+
+    @Test
+    @DisplayName("서킷이 열려 실패 처리할 때 선점 해제에 실패해도 주문은 실패로 남긴다 - 승인 중으로 두면 복구가 실제 승인을 보내 이중 결제가 될 수 있음")
+    void staysFailedWhenReleaseFailsAfterPaymentCircuitOpen() {
+        String orderNo = couponOrder();
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(promotionApiClient.confirmCoupon(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willThrow(paymentCircuitOpen());
+        willThrow(new PromotionServiceUnavailableException()).given(promotionApiClient).releaseCoupon(orderNo);
+        willThrow(new ProductServiceUnavailableException()).given(productApiClient).releaseReservation(orderNo);
+
+        assertRejected(orderNo, request(DISCOUNTED_AMOUNT), OrderErrorCode.PAYMENT_SERVICE_UNAVAILABLE);
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.FAILED);
+        // 쿠폰 해제가 실패해도 재고 해제는 시도
+        verify(productApiClient).releaseReservation(orderNo);
+    }
+
+    @Test
     @DisplayName("선점 확정 중 product-service 장애가 나면 결제를 요청하지 않고 승인 중으로 남긴다")
     void staysApprovingWhenConfirmFails() {
         String orderNo = paymentWaitingOrder();
         given(productApiClient.confirmReservation(orderNo)).willThrow(new ProductServiceUnavailableException());
 
-        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(AMOUNT));
+        OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(AMOUNT));
 
         assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
@@ -260,7 +294,7 @@ class OrderPaymentServiceTest {
         given(paymentApiClient.approve(any())).willReturn(failed(orderNo));
         willThrow(new ProductServiceUnavailableException()).given(productApiClient).releaseReservation(orderNo);
 
-        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(AMOUNT));
+        OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(AMOUNT));
 
         assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
         assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
@@ -293,7 +327,7 @@ class OrderPaymentServiceTest {
         String orderNo = paymentWaitingOrder();
         changeStatus(orderNo, "PAID", LocalDateTime.now());
 
-        OrderPaymentResponse response = orderPaymentService.approve(MEMBER_ID, orderNo, request(AMOUNT));
+        OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(AMOUNT));
 
         assertThat(response.status()).isEqualTo(OrderStatus.PAID);
         verifyNoInteractions(productApiClient, paymentApiClient);
@@ -324,7 +358,7 @@ class OrderPaymentServiceTest {
     void rejectsOtherMembersOrder() {
         String orderNo = paymentWaitingOrder();
 
-        assertThatThrownBy(() -> orderPaymentService.approve(2L, orderNo, request(AMOUNT)))
+        assertThatThrownBy(() -> orderPaymentService.approvePayment(2L, orderNo, request(AMOUNT)))
                 .isInstanceOf(OrderException.class)
                 .extracting("errorCode")
                 .isEqualTo(OrderErrorCode.ORDER_NOT_FOUND);
@@ -422,6 +456,20 @@ class OrderPaymentServiceTest {
     }
 
     @Test
+    @DisplayName("복구 중 서킷이 열려 있으면 실패 처리하지 않고 승인 중으로 남긴다 - 이전 승인 요청이 이미 결제됐을 수 있음")
+    void keepsApprovingWhenPaymentCircuitOpenDuringRecovery() {
+        String orderNo = unknownMarkedOrder(LocalDateTime.now().minusSeconds(30));
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willThrow(paymentCircuitOpen());
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
+        assertThat(approvalUnknownAtOf(orderNo)).isNotNull();
+        verify(productApiClient, never()).releaseReservation(anyString());
+    }
+
+    @Test
     @DisplayName("승인 시작 후 재시도 상한이 지난 주문은 더 이상 복구하지 않고 승인 중으로 둔다 - 수동 확인 대상")
     void stopsRetryingAfterGiveUpAfter() {
         String orderNo = unknownMarkedOrder(LocalDateTime.now().minusMinutes(16));
@@ -470,7 +518,7 @@ class OrderPaymentServiceTest {
     void skipsPaymentLookupForPaymentWaitingOrder() {
         String orderNo = paymentWaitingOrder();
 
-        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+        OrderDetailResponse response = orderPaymentService.getOrderWithPayment(MEMBER_ID, orderNo);
 
         assertThat(response.payment()).isNull();
         verify(paymentApiClient, never()).findPayment(anyString());
@@ -481,7 +529,7 @@ class OrderPaymentServiceTest {
     void skipsPaymentLookupForApprovingOrder() {
         String orderNo = staleApprovingOrder();
 
-        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+        OrderDetailResponse response = orderPaymentService.getOrderWithPayment(MEMBER_ID, orderNo);
 
         assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
         assertThat(response.payment()).isNull();
@@ -496,7 +544,7 @@ class OrderPaymentServiceTest {
         LocalDateTime approvedAt = LocalDateTime.of(2026, 9, 22, 12, 5);
         given(paymentApiClient.findPayment(orderNo)).willReturn(Optional.of(new PaymentResponse("DONE", AMOUNT, "카드", approvedAt)));
 
-        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+        OrderDetailResponse response = orderPaymentService.getOrderWithPayment(MEMBER_ID, orderNo);
 
         assertThat(response.status()).isEqualTo(OrderStatus.PAID);
         assertThat(response.payment()).isEqualTo(new OrderDetailResponse.Payment("DONE", AMOUNT, "카드", approvedAt));
@@ -509,7 +557,7 @@ class OrderPaymentServiceTest {
         changeStatus(orderNo, "FAILED", LocalDateTime.now());
         given(paymentApiClient.findPayment(orderNo)).willReturn(Optional.of(new PaymentResponse("FAILED", AMOUNT, null, null)));
 
-        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+        OrderDetailResponse response = orderPaymentService.getOrderWithPayment(MEMBER_ID, orderNo);
 
         assertThat(response.status()).isEqualTo(OrderStatus.FAILED);
         assertThat(response.payment()).isEqualTo(new OrderDetailResponse.Payment("FAILED", AMOUNT, null, null));
@@ -522,7 +570,7 @@ class OrderPaymentServiceTest {
         changeStatus(orderNo, "FAILED", null);
         given(paymentApiClient.findPayment(orderNo)).willReturn(Optional.empty());
 
-        assertThat(orderPaymentService.getOrder(MEMBER_ID, orderNo).payment()).isNull();
+        assertThat(orderPaymentService.getOrderWithPayment(MEMBER_ID, orderNo).payment()).isNull();
     }
 
     @Test
@@ -532,7 +580,7 @@ class OrderPaymentServiceTest {
         changeStatus(orderNo, "PAID", LocalDateTime.now());
         given(paymentApiClient.findPayment(orderNo)).willThrow(new PaymentServiceUnavailableException("연결 실패"));
 
-        OrderDetailResponse response = orderPaymentService.getOrder(MEMBER_ID, orderNo);
+        OrderDetailResponse response = orderPaymentService.getOrderWithPayment(MEMBER_ID, orderNo);
 
         assertThat(response.status()).isEqualTo(OrderStatus.PAID);
         assertThat(response.payment()).isNull();
@@ -546,11 +594,11 @@ class OrderPaymentServiceTest {
         given(paymentApiClient.findPayment(orderNo))
                 .willThrow(CallNotPermittedException.createCallNotPermittedException(CircuitBreaker.ofDefaults("paymentService")));
 
-        assertThat(orderPaymentService.getOrder(MEMBER_ID, orderNo).payment()).isNull();
+        assertThat(orderPaymentService.getOrderWithPayment(MEMBER_ID, orderNo).payment()).isNull();
     }
 
     private void assertRejected(String orderNo, OrderPaymentRequest request, OrderErrorCode errorCode) {
-        assertThatThrownBy(() -> orderPaymentService.approve(MEMBER_ID, orderNo, request))
+        assertThatThrownBy(() -> orderPaymentService.approvePayment(MEMBER_ID, orderNo, request))
                 .isInstanceOf(OrderException.class)
                 .extracting("errorCode")
                 .isEqualTo(errorCode);
@@ -618,6 +666,10 @@ class OrderPaymentServiceTest {
 
     private static PaymentApproveResponse done(String orderNo) {
         return new PaymentApproveResponse(orderNo, "DONE", null);
+    }
+
+    private static CallNotPermittedException paymentCircuitOpen() {
+        return CallNotPermittedException.createCallNotPermittedException(CircuitBreaker.ofDefaults("paymentService"));
     }
 
     private static PaymentApproveResponse failed(String orderNo) {

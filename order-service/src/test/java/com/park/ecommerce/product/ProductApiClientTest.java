@@ -73,7 +73,7 @@ class ProductApiClientTest {
     void sendsReservationInContractFormat() {
         responseStatus = 204;
 
-        productApiClient.reserve(REQUEST);
+        productApiClient.reserveStock(REQUEST);
 
         assertThat(receivedRequest).isEqualTo("POST /internal/stock-reservations");
         assertThat(jsonMapper.readTree(receivedBody)).isEqualTo(jsonMapper.readTree("""
@@ -93,7 +93,7 @@ class ProductApiClientTest {
                 { "code": "INSUFFICIENT_STOCK", "message": "재고가 부족합니다." }
                 """;
 
-        assertThatThrownBy(() -> productApiClient.reserve(REQUEST))
+        assertThatThrownBy(() -> productApiClient.reserveStock(REQUEST))
                 .isInstanceOf(OrderException.class)
                 .extracting("errorCode")
                 .isEqualTo(OrderErrorCode.INSUFFICIENT_STOCK);
@@ -145,7 +145,7 @@ class ProductApiClientTest {
     void convertsServerErrorToUnavailable() {
         responseStatus = 500;
 
-        assertThatThrownBy(() -> productApiClient.reserve(REQUEST))
+        assertThatThrownBy(() -> productApiClient.reserveStock(REQUEST))
                 .isInstanceOf(ProductServiceUnavailableException.class);
     }
 
@@ -154,7 +154,7 @@ class ProductApiClientTest {
     void convertsConnectionFailureToUnavailable() {
         server.stop(0);
 
-        assertThatThrownBy(() -> productApiClient.reserve(REQUEST))
+        assertThatThrownBy(() -> productApiClient.reserveStock(REQUEST))
                 .isInstanceOf(ProductServiceUnavailableException.class);
     }
 }

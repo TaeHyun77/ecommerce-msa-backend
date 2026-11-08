@@ -84,7 +84,7 @@ class OrderPlacementServiceTest {
     void savesPaymentWaitingOrderWithSnapshot() {
         givenProducts(onSale(1L, "유기농 우유 900ml", 3_900, 10), onSale(2L, "국산콩 두부 300g", 2_500, 10));
 
-        OrderCreateResponse response = orderPlacementService.place(newMemberId(), request(item(1L, 2), item(2L, 1)));
+        OrderCreateResponse response = orderPlacementService.createOrder(newMemberId(), request(item(1L, 2), item(2L, 1)));
 
         Order order = orderRepository.findByOrderNo(response.orderNo()).orElseThrow();
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PAYMENT_WAITING);
@@ -103,10 +103,10 @@ class OrderPlacementServiceTest {
     void reservesStockWithSameOrderNoAndExpiresAt() {
         givenProducts(onSale(1L, "유기농 우유 900ml", 3_900, 10), onSale(2L, "국산콩 두부 300g", 2_500, 10));
 
-        OrderCreateResponse response = orderPlacementService.place(newMemberId(), request(item(1L, 2), item(2L, 1)));
+        OrderCreateResponse response = orderPlacementService.createOrder(newMemberId(), request(item(1L, 2), item(2L, 1)));
 
         ArgumentCaptor<StockReservationRequest> captor = ArgumentCaptor.forClass(StockReservationRequest.class);
-        verify(productApiClient).reserve(captor.capture());
+        verify(productApiClient).reserveStock(captor.capture());
         assertThat(captor.getValue()).isEqualTo(new StockReservationRequest(
                 response.orderNo(),
                 response.expiresAt(),
@@ -119,9 +119,9 @@ class OrderPlacementServiceTest {
     void rejectsOrderWhenReservationFails() {
         Long memberId = newMemberId();
         givenProducts(onSale(1L, "유기농 우유 900ml", 3_900, 10));
-        willThrow(new ProductServiceUnavailableException()).given(productApiClient).reserve(any());
+        willThrow(new ProductServiceUnavailableException()).given(productApiClient).reserveStock(any());
 
-        assertThatThrownBy(() -> orderPlacementService.place(memberId, request(item(1L, 2))))
+        assertThatThrownBy(() -> orderPlacementService.createOrder(memberId, request(item(1L, 2))))
                 .isInstanceOf(ProductServiceUnavailableException.class);
 
         assertThat(orderRepository.findAllByMemberIdOrderByOrderedAtDesc(memberId)).isEmpty();
@@ -135,7 +135,7 @@ class OrderPlacementServiceTest {
         givenProducts(onSale(1L, "가".repeat(256), 3_900, 10));
         given(promotionApiClient.reserveCoupon(any())).willReturn(2_000);
 
-        assertThatThrownBy(() -> orderPlacementService.place(memberId, couponRequest(10L, item(1L, 2))))
+        assertThatThrownBy(() -> orderPlacementService.createOrder(memberId, couponRequest(10L, item(1L, 2))))
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         String orderNo = reservedOrderNo();
@@ -149,7 +149,7 @@ class OrderPlacementServiceTest {
     void skipsPromotionWithoutCoupon() {
         givenProducts(onSale(1L, "유기농 우유 900ml", 3_900, 10));
 
-        OrderCreateResponse response = orderPlacementService.place(newMemberId(), request(item(1L, 2)));
+        OrderCreateResponse response = orderPlacementService.createOrder(newMemberId(), request(item(1L, 2)));
 
         assertThat(response.status()).isEqualTo(OrderStatus.PAYMENT_WAITING);
         verifyNoInteractions(promotionApiClient);
@@ -162,7 +162,7 @@ class OrderPlacementServiceTest {
         givenProducts(onSale(1L, "유기농 우유 900ml", 3_900, 10), onSale(2L, "국산콩 두부 300g", 2_500, 10));
         given(promotionApiClient.reserveCoupon(any())).willReturn(2_000);
 
-        OrderCreateResponse response = orderPlacementService.place(memberId, couponRequest(10L, item(1L, 2), item(2L, 1)));
+        OrderCreateResponse response = orderPlacementService.createOrder(memberId, couponRequest(10L, item(1L, 2), item(2L, 1)));
 
         ArgumentCaptor<CouponReservationRequest> captor = ArgumentCaptor.forClass(CouponReservationRequest.class);
         verify(promotionApiClient).reserveCoupon(captor.capture());
@@ -202,9 +202,9 @@ class OrderPlacementServiceTest {
         Long memberId = newMemberId();
         givenProducts(onSale(1L, "유기농 우유 900ml", 3_900, 10));
         given(promotionApiClient.reserveCoupon(any())).willReturn(2_000);
-        willThrow(new OrderException(OrderErrorCode.INSUFFICIENT_STOCK)).given(productApiClient).reserve(any());
+        willThrow(new OrderException(OrderErrorCode.INSUFFICIENT_STOCK)).given(productApiClient).reserveStock(any());
 
-        assertThatThrownBy(() -> orderPlacementService.place(memberId, couponRequest(10L, item(1L, 2))))
+        assertThatThrownBy(() -> orderPlacementService.createOrder(memberId, couponRequest(10L, item(1L, 2))))
                 .isInstanceOf(OrderException.class)
                 .extracting("errorCode")
                 .isEqualTo(OrderErrorCode.INSUFFICIENT_STOCK);
@@ -221,10 +221,10 @@ class OrderPlacementServiceTest {
         Long memberId = newMemberId();
         givenProducts(onSale(1L, "유기농 우유 900ml", 3_900, 10));
         given(promotionApiClient.reserveCoupon(any())).willReturn(2_000);
-        willThrow(new OrderException(OrderErrorCode.INSUFFICIENT_STOCK)).given(productApiClient).reserve(any());
+        willThrow(new OrderException(OrderErrorCode.INSUFFICIENT_STOCK)).given(productApiClient).reserveStock(any());
         willThrow(new PromotionServiceUnavailableException()).given(promotionApiClient).releaseCoupon(anyString());
 
-        assertThatThrownBy(() -> orderPlacementService.place(memberId, couponRequest(10L, item(1L, 2))))
+        assertThatThrownBy(() -> orderPlacementService.createOrder(memberId, couponRequest(10L, item(1L, 2))))
                 .isInstanceOf(OrderException.class)
                 .extracting("errorCode")
                 .isEqualTo(OrderErrorCode.INSUFFICIENT_STOCK);
@@ -240,13 +240,13 @@ class OrderPlacementServiceTest {
         given(productApiClient.confirmReservation(anyString())).willReturn(true);
         given(promotionApiClient.confirmCoupon(anyString())).willReturn(true);
 
-        OrderCreateResponse response = orderPlacementService.place(newMemberId(), couponRequest(10L, item(1L, 2)));
+        OrderCreateResponse response = orderPlacementService.createOrder(newMemberId(), couponRequest(10L, item(1L, 2)));
 
         assertThat(response.amount()).isZero();
         assertThat(response.status()).isEqualTo(OrderStatus.PAID);
         assertThat(orderRepository.findByOrderNo(response.orderNo()).orElseThrow().getStatus()).isEqualTo(OrderStatus.PAID);
         InOrder inOrder = inOrder(productApiClient, promotionApiClient);
-        inOrder.verify(productApiClient).reserve(any());
+        inOrder.verify(productApiClient).reserveStock(any());
         inOrder.verify(productApiClient).confirmReservation(response.orderNo());
         inOrder.verify(promotionApiClient).confirmCoupon(response.orderNo());
         verifyNoInteractions(paymentApiClient);
@@ -260,7 +260,7 @@ class OrderPlacementServiceTest {
         given(productApiClient.confirmReservation(anyString())).willReturn(true);
         given(promotionApiClient.confirmCoupon(anyString())).willThrow(new PromotionServiceUnavailableException());
 
-        OrderCreateResponse response = orderPlacementService.place(newMemberId(), couponRequest(10L, item(1L, 2)));
+        OrderCreateResponse response = orderPlacementService.createOrder(newMemberId(), couponRequest(10L, item(1L, 2)));
 
         assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
         assertThat(orderRepository.findByOrderNo(response.orderNo()).orElseThrow().getStatus()).isEqualTo(OrderStatus.APPROVING);
@@ -303,19 +303,19 @@ class OrderPlacementServiceTest {
     }
 
     private void assertRejected(Long memberId, OrderCreateRequest request, OrderErrorCode errorCode) {
-        assertThatThrownBy(() -> orderPlacementService.place(memberId, request))
+        assertThatThrownBy(() -> orderPlacementService.createOrder(memberId, request))
                 .isInstanceOf(OrderException.class)
                 .extracting("errorCode")
                 .isEqualTo(errorCode);
 
         assertThat(orderRepository.findAllByMemberIdOrderByOrderedAtDesc(memberId)).isEmpty();
-        verify(productApiClient, never()).reserve(any());
+        verify(productApiClient, never()).reserveStock(any());
     }
 
     // 주문을 저장하지 않은 경우의 주문번호 - 선점 요청에 실린 값으로 확인
     private String reservedOrderNo() {
         ArgumentCaptor<StockReservationRequest> captor = ArgumentCaptor.forClass(StockReservationRequest.class);
-        verify(productApiClient).reserve(captor.capture());
+        verify(productApiClient).reserveStock(captor.capture());
         return captor.getValue().orderNo();
     }
 

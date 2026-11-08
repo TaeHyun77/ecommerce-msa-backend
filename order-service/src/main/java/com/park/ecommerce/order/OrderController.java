@@ -44,7 +44,7 @@ public class OrderController {
             @RequestHeader(MEMBER_ID_HEADER) Long memberId,
             @PathVariable String orderNo
     ) {
-        return orderPaymentService.getOrder(memberId, orderNo);
+        return orderPaymentService.getOrderWithPayment(memberId, orderNo);
     }
 
     // 주문 생성
@@ -54,7 +54,7 @@ public class OrderController {
             @RequestHeader(MEMBER_ID_HEADER) Long memberId,
             @Valid @RequestBody OrderCreateRequest request
     ) {
-        return orderPlacementService.place(memberId, request);
+        return orderPlacementService.createOrder(memberId, request);
     }
 
     // 결제 승인 - 토스페이먼츠 결제창 인증 후 successUrl에서 호출
@@ -65,7 +65,7 @@ public class OrderController {
             @PathVariable String orderNo,
             @Valid @RequestBody OrderPaymentRequest request
     ) {
-        OrderPaymentResponse response = orderPaymentService.approve(memberId, orderNo, request);
+        OrderPaymentResponse response = orderPaymentService.approvePayment(memberId, orderNo, request);
         HttpStatus status = response.status() == OrderStatus.PAID ? HttpStatus.OK : HttpStatus.ACCEPTED;
         return ResponseEntity.status(status).body(response);
     }
