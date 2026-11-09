@@ -12,7 +12,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
-// 결과를 모른 채 승인 중(APPROVING)으로 멈춘 주문을 주기적으로 다시 처리해 결제 완료 또는 실패로 확정함
+// 결과를 모른 채 승인 중(APPROVING)으로 멈춘 주문을 주기적으로 다시 처리하여 결제 완료 또는 실패로 확정함
 @Slf4j
 @Component
 public class OrderApprovalRecoveryScheduler {
@@ -54,7 +54,7 @@ public class OrderApprovalRecoveryScheduler {
 
         for (String orderNo : orderNos) {
             try {
-                OrderStatus status = orderPaymentService.recover(orderNo);
+                OrderStatus status = orderPaymentService.recoverApproval(orderNo);
                 log.info("[결제 복구] orderNo={}, 결과={}", orderNo, status);
             } catch (RuntimeException e) {
                 // 한 건의 실패가 같은 회차의 나머지 건 처리를 막지 않도록 건 단위로 격리 - 실패한 건은 다음 회차에 다시 대상이 됨

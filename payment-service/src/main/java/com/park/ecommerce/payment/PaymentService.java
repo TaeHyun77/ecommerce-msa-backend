@@ -47,9 +47,10 @@ public class PaymentService {
         try {
             // 결제 승인 요청
             applyTossStatus(payment, tossPaymentsClient.confirm(payment.getPaymentKey(), payment.getOrderNo(), payment.getAmount()), null);
-        } catch (TossPaymentsException e) { // 읽기/연결 타임아웃, 4xx 거절 (카드사 거절, 인증 시간 만료 ..), 5xx 거절 (내부 오류 ..)
+        } catch (TossPaymentsException e) { // 읽기 or 연결 타임아웃, 5xx 거절, 4xx 거절 (카드사 거절, 인증 시간 만료 ..)
+            // 타임아웃 : PaymentErrorCode.PAYMENT_RESULT_UNKNOWN 반환
+            // 타임아웃 이외 : 결과 한 번 조회 해보고 결정
             if (e.isNoResponse()) throw resultUnknown(payment, "승인 응답 없음: " + e.getMessage());
-            // 오류 응답에도 처리 중(409), 이미 처리됨(400)처럼 실패가 아닌 코드가 섞여 있어 결제 상태로 확정
             resolveByInquiry(payment, e);
         }
 

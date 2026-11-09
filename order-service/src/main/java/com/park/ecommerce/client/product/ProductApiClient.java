@@ -6,7 +6,6 @@ import com.park.ecommerce.exception.ProductServiceUnavailableException;
 import com.park.ecommerce.client.product.dto.ProductSummaryResponse;
 import com.park.ecommerce.client.product.dto.StockReservationRequest;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
-import io.github.resilience4j.retry.annotation.Retry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
@@ -38,16 +37,14 @@ public class ProductApiClient {
         }
     }
 
+    // 재고 선점
     // 한 상품이라도 재고가 부족하면 product-service가 전체를 롤백하고 409로 응답
-    // 결과를 모르면 (타임아웃, 5xx) 같은 주문번호로 한 번 더 요청 - product-service가 같은 주문의 선점을 성공으로 응답하므로, 첫 요청이 실제로 선점했어도 재고는 한 번만 차감됨
-    @Retry(name = "stockReservation")
-    public void reserve(StockReservationRequest request) {
+    public void reserveStock(StockReservationRequest request) {
         try {
             productServiceRestClient.post()
                     .uri("/internal/stock-reservations")
                     .body(request)
                     .retrieve()
-                    // 같은 주문번호의 재요청은 성공으로 응답되므로 409는 재고 부족을 뜻한다 - 호출별 처리가 공통 4xx 처리(계약 불일치)보다 먼저 적용됨
                     .onStatus(status -> status.value() == HttpStatus.CONFLICT.value(), (req, res) -> {
                         throw new OrderException(OrderErrorCode.INSUFFICIENT_STOCK);
                     })
@@ -57,7 +54,7 @@ public class ProductApiClient {
         }
     }
 
-    // PG 승인 직전에 호출 - 이미 확정된 선점은 product-service가 성공으로 응답하므로 복구 중 같은 확정을 다시 요청해도 true
+    // 재고 선점 확정
     public boolean confirmReservation(String orderNo) {
         try {
             return productServiceRestClient.post()
@@ -74,7 +71,7 @@ public class ProductApiClient {
         }
     }
 
-    // PG 승인이 거절되면 확정한 선점을 풀어 재고를 되돌린다 - 이미 해제된 선점도 성공으로 응답하므로 다시 요청해도 안전
+    // 재고 선점 해제
     public void releaseReservation(String orderNo) {
         try {
             productServiceRestClient.post()

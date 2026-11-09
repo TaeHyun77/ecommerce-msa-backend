@@ -47,9 +47,8 @@ public class OrderPlacementService {
         this.paymentWaitingTtl = paymentWaitingTtl;
     }
 
-    // 주문 생성
-    // 과정 : 재고 선점 -> 쿠폰 선점 -> 주문 생성
-    public OrderCreateResponse place(Long memberId, OrderCreateRequest request) {
+    // 쿠폰 선점 → 재고 선점 → 주문 생성 - 결제 금액이 0원이면 바로 승인까지 처리
+    public OrderCreateResponse createOrder(Long memberId, OrderCreateRequest request) {
         if (request.hasDuplicateProduct()) { // 중복 상품 주문 여부 검사
             throw new OrderException(OrderErrorCode.DUPLICATE_ORDER_PRODUCT);
         }
@@ -63,22 +62,22 @@ public class OrderPlacementService {
                 .expiresAt(now.plus(paymentWaitingTtl))
                 .build();
 
+        // 주문에 포함된 상품을 주문 항목으로 추가
         request.items().forEach(item -> {
             ProductSummaryResponse product = products.get(item.productId());
             order.addLine(product.productId(), product.name(), product.price(), item.quantity());
         });
 
-        if (request.memberCouponId() != null) { // 주문에 쿠폰을 사용할 때, 쿠폰 선점
-            reserveCoupon(order, request.memberCouponId());
-        }
+        // 주문에 쿠폰을 사용할 때, 쿠폰 선점
+        if (request.memberCouponId() != null) reserveCoupon(order, request.memberCouponId());
         reserveStock(order); // 재고 선점
         saveOrder(order); // 주문 생성 ( 주문 시점의 상품 정보를 스냅샷으로 저장하여 이후 변경과 무관하게 유지 )
 
         log.debug("[주문] 결제 대기 주문 생성 orderNo={}, 결제 기한={}", order.getOrderNo(), order.getExpiresAt());
 
-        // 결제 금액이 0원이면 결제창을 띄울 수 없으므로 바로 확정 - 토스 정책
+        // 결제 금액이 0원이면 결제창을 띄울 수 없으므로 바로 확정 (토스 정책)
         if (order.getPaymentAmount() == 0) {
-            OrderPaymentResponse payment = orderPaymentService.approveWithoutPayment(order);
+            OrderPaymentResponse payment = orderPaymentService.approveFreeOrder(order);
             return OrderCreateResponse.of(order, payment.status());
         }
         return OrderCreateResponse.from(order);
@@ -111,7 +110,7 @@ public class OrderPlacementService {
     // 재고 선점
     private void reserveStock(Order order) {
         try {
-            productApiClient.reserve(StockReservationRequest.from(order));
+            productApiClient.reserveStock(StockReservationRequest.from(order));
         } catch (RuntimeException e) {
             // 타임아웃처럼 실제로는 선점됐을 수 있는 경우에도, 그 선점은 결제 기한에 product-service가 해제하여 재고가 복구됨
             releaseCoupon(order);
