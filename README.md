@@ -4,7 +4,7 @@
 
 회원, 상품, 주문, 결제, 검색 등의 서비스를 분리하고, 서비스 간 호출과 메시징 과정에서 발생할 수 있는 재고, 결제 정합성 및 검색 데이터 동기화 문제를 해결하는 데 중점을 두었습니다.
 
-기술 블로그 : https://velog.io/@ayeah77/series/E-commerce-MSA-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8-%EA%B0%9C%EB%B0%9C%EA%B8%B0<br><br>
+기술 블로그 : <a href="https://velog.io/@ayeah77/series/E-commerce-MSA-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8-%EA%B0%9C%EB%B0%9C%EA%B8%B0" target="_blank">E-commerce MSA 프로젝트 개발기</a><br><br>
 
 ### 기술 스택 
 ---
