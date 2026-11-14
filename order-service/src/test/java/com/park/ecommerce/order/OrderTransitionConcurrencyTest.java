@@ -56,7 +56,7 @@ class OrderTransitionConcurrencyTest {
             // 두 쪽에 서로 다른 시각을 넘겨 시간 조건은 모두 참으로 만든다 - 행 잠금과 상태 조건만으로 승패가 갈리는지 확인하기 위해
             List<Throwable> errors = runConcurrently(List.of(
                     () -> started.set(transactionTemplate.execute(status ->
-                            orderRepository.startApproval(orderNo, PAYMENT_KEY, expiresAt.minusSeconds(1)))),
+                            orderRepository.startApproval(orderNo, PAYMENT_KEY, expiresAt.minusSeconds(1), expiresAt.plusMinutes(2)))),
                     () -> failed.set(transactionTemplate.execute(status ->
                             orderRepository.failExpired(expiresAt.plusSeconds(1))))
             ));

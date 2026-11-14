@@ -53,11 +53,11 @@ public class Order {
     @Column(length = 200) // 토스페이먼츠 paymentKey 최대 길이
     private String paymentKey; // 결제 승인을 시작할 때 기록 - 복구 스케줄러가 같은 결제로 다시 승인을 요청하는 데 사용
 
-    private LocalDateTime approvalRequestedAt; // 결제 승인을 시작한 시각 - 복구 대상을 고르는 기준이자 재시도 상한의 기준
+    private LocalDateTime approvalRequestedAt; // 결제 승인을 시작한 시각 - 재시도 상한의 기준
 
-    // 승인 요청이 결과를 모른 채 끝난 시각 - 있으면 승인 시작 후 대기 없이 바로 복구 대상
-    // approvalRequestedAt을 덮어쓰지 않고 따로 두어 재시도 상한 계산이 흐트러지지 않도록 함
-    private LocalDateTime approvalUnknownAt;
+    // 복구 스케줄러가 이 주문을 다시 처리할 시각 - 승인 중이고 이 시각이 지난 주문만 복구 대상
+    // 승인 시작 때는 진행 중인 요청과 겹치지 않도록 뒤로 적고, 결과를 모른 채 끝나면 지금으로 당기며, 재시도 상한을 넘기면 비워 재시도를 멈춤
+    private LocalDateTime nextRetryAt;
 
     // 품목은 주문과 생명주기가 같아 함께 저장
     @OneToMany(mappedBy = "order", cascade = CascadeType.PERSIST)
