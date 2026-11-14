@@ -3,8 +3,6 @@ package com.park.ecommerce.order;
 import com.park.ecommerce.exception.OrderErrorCode;
 import com.park.ecommerce.exception.OrderException;
 import com.park.ecommerce.exception.PaymentResultUnknownException;
-import com.park.ecommerce.exception.ProductServiceUnavailableException;
-import com.park.ecommerce.exception.PromotionServiceUnavailableException;
 import com.park.ecommerce.order.domain.Order;
 import com.park.ecommerce.order.domain.OrderRepository;
 import com.park.ecommerce.order.domain.OrderStatus;
@@ -103,26 +101,22 @@ public class OrderPaymentService {
                 return ApprovalOutcome.PAID;
             }
 
-            // 승인 거절 시 쿠폰과 재고 선점을 해제하고 주문을 실패 처리
-            // 쿠폰을 먼저 해제 - 재고를 먼저 풀고 쿠폰 해제가 실패하면, 복구 때 재고 확정이 실패해 쿠폰이 사용 상태로 남음
+            // 승인 거절 시, 쿠폰 해제한 후 재고 선점을 해제하여, 쿠폰이 사용 상태로 남는 문제를 방지
             if (order.hasCoupon()) promotionApiClient.releaseCoupon(orderNo);
             productApiClient.releaseReservation(orderNo);
             orderService.failApproving(orderNo);
             log.debug("[결제] 결제 거절로 선점 해제 후 주문 실패 처리 orderNo={}", orderNo);
             return ApprovalOutcome.PAYMENT_FAILED;
 
-        // 타임 아웃과 같은 결과 불명 시, UNKNOWN으로 상태 변경하고 재시도 대상으로 됨
-        // 재고, 쿠폰 확정 중 서킷 열림과 복구 중 payment-service 서킷 열림도 여기서 처리
-        } catch (ProductServiceUnavailableException | PromotionServiceUnavailableException | CallNotPermittedException | PaymentResultUnknownException e) {
-            log.warn("[결제] 결과 불명으로 승인 중 유지 orderNo={}, 사유={}", orderNo, e.getMessage());
+        // 승인 시작 후 발생한 예외는 결제 성공 여부를 알 수 없으므로 복구 작업이 재처리
+        } catch (RuntimeException e) {
+            log.warn("[결제] 승인 중 오류로 승인 중 유지 orderNo={}", orderNo, e);
             orderService.markApprovalUnknown(orderNo);
             return ApprovalOutcome.UNKNOWN;
         }
     }
 
-    // 사용자 요청의 승인이 서킷 열림으로 나가지 못한 경우 - 이 주문의 첫 승인 요청이라 결제되지 않았음이 확실하므로 주문을 실패로 끝내고 선점을 해제
-    // 실패 처리를 해제보다 먼저 함 - 해제 도중 서버가 멈춰도 승인 중으로 남지 않아 복구가 실제 승인을 보내지 않음
-    // 해제에 실패해도 승인 중으로 되돌리지 않음 - 확정된 선점은 만료로 풀리지 않으므로 로그를 보고 수동으로 해제
+    // 서킷이 열려 최초 승인 요청이 전달되지 않은 경우 주문을 실패 처리한 후 쿠폰과 재고 선점을 해제. 해제에 실패하더라도 승인 중 상태로 되돌리지 않으며, 로그를 통해 확인 후 수동으로 해제
     private ApprovalOutcome failWithoutApproval(Order order) {
         String orderNo = order.getOrderNo();
         orderService.failApproving(orderNo);

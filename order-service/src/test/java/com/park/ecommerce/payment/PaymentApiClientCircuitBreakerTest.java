@@ -36,7 +36,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 })
 class PaymentApiClientCircuitBreakerTest {
     private static final PaymentApproveRequest REQUEST = new PaymentApproveRequest("ORDER-0001", "tgen_pay_0001", 7_800);
-    private static final int MINIMUM_NUMBER_OF_CALLS = 10; // 서킷이 실패율을 판단하기 시작하는 호출 수 (application.properties)
+    // 서킷이 실패율을 판단하기 시작하는 호출 수 - minimum-number-of-calls를 두지 않아 창(sliding-window-size)이 다 찬 뒤부터 판단함 (application.properties)
+    private static final int SLIDING_WINDOW_SIZE = 20;
 
     private static final AtomicInteger RESPONSE_STATUS = new AtomicInteger();
     private static final AtomicInteger RECEIVED_REQUESTS = new AtomicInteger();
@@ -74,7 +75,7 @@ class PaymentApiClientCircuitBreakerTest {
     @DisplayName("payment-service가 연달아 5xx로 응답하면 서킷이 열려, 이후 호출은 보내지 않고 바로 거절한다")
     void opensCircuitOnConsecutiveServerErrors() {
         RESPONSE_STATUS.set(503);
-        for (int i = 0; i < MINIMUM_NUMBER_OF_CALLS; i++) {
+        for (int i = 0; i < SLIDING_WINDOW_SIZE; i++) {
             assertThatThrownBy(() -> paymentApiClient.approve(REQUEST)).isInstanceOf(PaymentResultUnknownException.class);
         }
         int requestsBeforeOpen = RECEIVED_REQUESTS.get();
@@ -87,13 +88,13 @@ class PaymentApiClientCircuitBreakerTest {
     @DisplayName("호출 계약 오류(4xx)는 payment-service 장애가 아니므로 서킷을 열지 않는다")
     void keepsCircuitClosedOnContractErrors() {
         RESPONSE_STATUS.set(409);
-        for (int i = 0; i <= MINIMUM_NUMBER_OF_CALLS; i++) {
+        for (int i = 0; i <= SLIDING_WINDOW_SIZE; i++) {
             assertThatThrownBy(() -> paymentApiClient.approve(REQUEST))
                     .isInstanceOf(PaymentResultUnknownException.class)
                     .isNotInstanceOf(CallNotPermittedException.class);
         }
 
-        assertThat(RECEIVED_REQUESTS.get()).isEqualTo(MINIMUM_NUMBER_OF_CALLS + 1);
+        assertThat(RECEIVED_REQUESTS.get()).isEqualTo(SLIDING_WINDOW_SIZE + 1);
     }
 
     private static HttpServer startPaymentService() {
