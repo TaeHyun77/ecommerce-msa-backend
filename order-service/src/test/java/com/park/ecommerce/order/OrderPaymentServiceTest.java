@@ -30,6 +30,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.config.ScheduledTaskHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.web.client.RestClientException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -230,6 +231,21 @@ class OrderPaymentServiceTest {
         String orderNo = paymentWaitingOrder();
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
         given(paymentApiClient.approve(any())).willThrow(new PaymentResultUnknownException("payment-service 응답 status=503"));
+
+        OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(AMOUNT));
+
+        assertThat(response.status()).isEqualTo(OrderStatus.APPROVING);
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
+        assertThat(approvalUnknownAtOf(orderNo)).isNotNull();
+        verify(productApiClient, never()).releaseReservation(anyString());
+    }
+
+    @Test
+    @DisplayName("승인 중 예상하지 못한 예외가 나도 오류로 응답하지 않고 승인 중으로 남겨 처리 중을 응답한다 - 이미 결제됐을 수 있음")
+    void staysApprovingOnUnexpectedException() {
+        String orderNo = paymentWaitingOrder();
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willThrow(new RestClientException("응답 본문 읽기 실패"));
 
         OrderPaymentResponse response = orderPaymentService.approvePayment(MEMBER_ID, orderNo, request(AMOUNT));
 
@@ -448,6 +464,19 @@ class OrderPaymentServiceTest {
         String orderNo = unknownMarkedOrder(LocalDateTime.now().minusSeconds(30));
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
         given(paymentApiClient.approve(any())).willThrow(new PaymentResultUnknownException("payment-service 응답 status=503"));
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
+        assertThat(approvalUnknownAtOf(orderNo)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("복구 중 예상하지 못한 예외가 나면 표시가 없던 주문에도 결과 불명을 표시한다 - 상한을 넘겼을 때 알림 대상이 되도록")
+    void marksUnknownOnUnexpectedExceptionDuringRecovery() {
+        String orderNo = staleApprovingOrder();
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willThrow(new RestClientException("응답 본문 읽기 실패"));
 
         orderApprovalRecoveryScheduler.recoverApprovals();
 
