@@ -136,6 +136,29 @@ class TossPaymentsClientTest {
     }
 
     @Test
+    @DisplayName("취소를 요청하면 결제 키 경로로 멱등키와 취소 사유를 보내고, 응답에서 취소 상태와 취소 시각을 읽는다")
+    void sendsCancelInTossFormat() {
+        responseStatus = 200;
+        responseBody = """
+                {
+                  "paymentKey": "tgen_pay_0001", "orderId": "ORDER-0001", "status": "CANCELED", "method": "카드", "totalAmount": 7800,
+                  "approvedAt": "2026-09-22T12:00:05+09:00",
+                  "cancels": [ { "cancelAmount": 7800, "cancelReason": "주문 취소", "canceledAt": "2026-09-22T13:30:00+09:00" } ]
+                }
+                """;
+
+        TossPaymentResponse payment = tossPaymentsClient.cancel("tgen_pay_0001", "주문 취소", "cancel-ORDER-0001");
+
+        assertThat(receivedRequest).isEqualTo("POST /v1/payments/tgen_pay_0001/cancel");
+        assertThat(receivedIdempotencyKey).isEqualTo("cancel-ORDER-0001");
+        assertThat(jsonMapper.readTree(receivedBody)).isEqualTo(jsonMapper.readTree("""
+                { "cancelReason": "주문 취소" }
+                """));
+        assertThat(payment.status()).isEqualTo("CANCELED");
+        assertThat(payment.canceledAt()).isEqualTo(OffsetDateTime.of(2026, 9, 22, 13, 30, 0, 0, ZoneOffset.ofHours(9)));
+    }
+
+    @Test
     @DisplayName("토스에 연결할 수 없으면 에러 코드 없이 응답 없음 예외를 던진다 - 결과를 알 수 없는 경우")
     void throwsWithoutCodeWhenUnreachable() {
         server.stop(0);

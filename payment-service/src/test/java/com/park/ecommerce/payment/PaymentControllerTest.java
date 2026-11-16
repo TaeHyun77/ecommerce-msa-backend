@@ -81,7 +81,7 @@ class PaymentControllerTest {
     @DisplayName("결제 정보를 조회하면 200과 결제 상태·금액·결제 수단·승인 시각을 응답하고 결제 키는 내보내지 않는다")
     void respondsPayment() throws Exception {
         given(paymentService.getPayment("ORDER-0001")).willReturn(
-                new PaymentResponse("ORDER-0001", PaymentStatus.DONE, 7_800, "카드", LocalDateTime.of(2026, 9, 22, 12, 0, 5)));
+                new PaymentResponse("ORDER-0001", PaymentStatus.DONE, 7_800, "카드", LocalDateTime.of(2026, 9, 22, 12, 0, 5), null));
 
         mockMvc.perform(get("/internal/payments/ORDER-0001"))
                 .andExpect(status().isOk())
@@ -100,6 +100,28 @@ class PaymentControllerTest {
         mockMvc.perform(get("/internal/payments/ORDER-0001"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PAYMENT_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("결제를 취소하면 200과 취소 상태·취소 시각을 응답한다")
+    void respondsCanceledPayment() throws Exception {
+        given(paymentService.cancel("ORDER-0001")).willReturn(new PaymentResponse("ORDER-0001", PaymentStatus.CANCELED, 7_800, "카드",
+                LocalDateTime.of(2026, 9, 22, 12, 0, 5), LocalDateTime.of(2026, 9, 22, 13, 30, 0)));
+
+        mockMvc.perform(post("/internal/payments/ORDER-0001/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELED"))
+                .andExpect(jsonPath("$.canceledAt").value("2026-09-22T13:30:00"));
+    }
+
+    @Test
+    @DisplayName("승인이 완료되지 않은 결제의 취소는 409를 응답한다")
+    void respondsConflictWhenNotCancelable() throws Exception {
+        given(paymentService.cancel("ORDER-0001")).willThrow(new PaymentException(PaymentErrorCode.PAYMENT_NOT_CANCELABLE));
+
+        mockMvc.perform(post("/internal/payments/ORDER-0001/cancel"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PAYMENT_NOT_CANCELABLE"));
     }
 
     private static RequestBuilder approve(String body) {

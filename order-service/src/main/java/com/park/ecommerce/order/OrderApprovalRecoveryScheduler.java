@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 // 결과를 모른 채 승인 중(APPROVING)으로 멈춘 주문을 주기적으로 다시 처리하여 결제 완료 또는 실패로 확정함
+// 취소 중(CANCELLING)으로 멈춘 주문도 같은 방식으로 다시 처리하여 취소 완료로 확정함
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -20,6 +21,7 @@ public class OrderApprovalRecoveryScheduler {
 
     private final OrderRepository orderRepository;
     private final OrderPaymentService orderPaymentService;
+    private final OrderCancelService orderCancelService;
 
     // 다음 시도 시각이 지난 승인 중 주문을 다시 처리 - 언제 다시 처리할지와 재시도 상한은 OrderService가 그 시각을 적거나 비워서 정함
     @Scheduled(fixedDelayString = "${order.approval-recovery.poll-delay}")
@@ -33,6 +35,20 @@ public class OrderApprovalRecoveryScheduler {
             } catch (RuntimeException e) {
                 // 한 건의 실패가 같은 회차의 나머지 건 처리를 막지 않도록 건 단위로 격리 - 실패한 건은 다음 회차에 다시 대상이 됨
                 log.error("[결제 복구] 예상하지 못한 오류 orderNo={}", orderNo, e);
+            }
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${order.approval-recovery.poll-delay}")
+    public void recoverCancels() {
+        List<String> orderNos = orderRepository.findRecoverableCancellingOrderNos(LocalDateTime.now(), PageRequest.of(0, BATCH_SIZE));
+
+        for (String orderNo : orderNos) {
+            try {
+                OrderStatus status = orderCancelService.recoverCancel(orderNo);
+                log.info("[주문 취소 복구] orderNo={}, 결과={}", orderNo, status);
+            } catch (RuntimeException e) {
+                log.error("[주문 취소 복구] 예상하지 못한 오류 orderNo={}", orderNo, e);
             }
         }
     }

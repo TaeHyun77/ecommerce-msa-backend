@@ -55,7 +55,9 @@ public class Order {
 
     private LocalDateTime approvalRequestedAt; // 결제 승인을 시작한 시각 - 재시도 상한의 기준
 
-    // 복구 스케줄러가 이 주문을 다시 처리할 시각 - 승인 중이고 이 시각이 지난 주문만 복구 대상
+    private LocalDateTime cancelRequestedAt; // 취소를 시작한 시각 - 취소 재시도 상한의 기준
+
+    // 복구 스케줄러가 이 주문을 다시 처리할 시각 - 승인 중이거나 취소 중이고 이 시각이 지난 주문만 복구 대상
     // 승인 시작 때는 진행 중인 요청과 겹치지 않도록 뒤로 적고, 결과를 모른 채 끝나면 지금으로 당기며, 재시도 상한을 넘기면 비워 재시도를 멈춤
     private LocalDateTime nextRetryAt;
 

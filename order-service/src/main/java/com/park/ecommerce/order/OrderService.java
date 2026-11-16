@@ -95,6 +95,30 @@ public class OrderService {
         orderRepository.failApproving(orderNo);
     }
 
+    // 취소 중으로 바꾼 뒤 바로 커밋 - 승인 시작과 같이, 이후 원격 호출 중에 서버가 멈춰도 복구 스케줄러가 찾을 수 있도록 함
+    @Transactional
+    public boolean startCancel(String orderNo) {
+        LocalDateTime now = LocalDateTime.now();
+        return orderRepository.startCancel(orderNo, now, now.plus(staleAfter)) == 1;
+    }
+
+    @Transactional
+    public void markCancelled(String orderNo) {
+        orderRepository.markCancelled(orderNo);
+    }
+
+    // 취소 처리가 결과를 모른 채 끝났을 때 호출 - 재시도 간격과 상한은 승인과 같은 설정을 씀
+    // 상한을 넘겨도 결제 완료로 되돌리지 않음 - 환불이 이미 됐을 수 있어, 재시도만 멈추고 수동으로 확인하도록 알림
+    @Transactional
+    public void markCancelUnknown(String orderNo) {
+        LocalDateTime now = LocalDateTime.now();
+        if (orderRepository.giveUpCancel(orderNo, now.minus(giveUpAfter)) == 1) {
+            log.error("[주문 취소] 재시도 상한 초과, 수동 확인 필요 orderNo={}", orderNo);
+            return;
+        }
+        orderRepository.markCancelUnknown(orderNo, now, now.minus(fastRetryWindow), now.plus(slowRetryInterval));
+    }
+
     @Transactional
     public int failExpiredOrders() {
         return orderRepository.failExpired(LocalDateTime.now());

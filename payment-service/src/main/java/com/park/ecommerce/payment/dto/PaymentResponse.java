@@ -11,7 +11,8 @@ public record PaymentResponse(
         PaymentStatus status,
         Integer amount,
         String method,
-        LocalDateTime approvedAt
+        LocalDateTime approvedAt,
+        LocalDateTime canceledAt // 취소 전에는 null
 ) {
     public static PaymentResponse from(Payment payment) {
         return new PaymentResponse(
@@ -19,7 +20,8 @@ public record PaymentResponse(
                 payment.getStatus(),
                 payment.getAmount(),
                 payment.getMethod(),
-                payment.getApprovedAt()
+                payment.getApprovedAt(),
+                payment.getCanceledAt()
         );
     }
 }

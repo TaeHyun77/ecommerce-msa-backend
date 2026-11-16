@@ -101,6 +101,23 @@ class PaymentApiClientTest {
     }
 
     @Test
+    @DisplayName("취소를 요청하면 주문번호 경로로 보내고, 결과 불명(503) 응답이면 결과 불명 예외를 던진다")
+    void sendsCancelAndThrowsUnknownOnServerError() {
+        responseStatus = 200;
+        responseBody = """
+                { "orderNo": "ORDER-0001", "status": "CANCELED" }
+                """;
+
+        paymentApiClient.cancel("ORDER-0001");
+
+        assertThat(receivedRequest).isEqualTo("POST /internal/payments/ORDER-0001/cancel");
+
+        responseStatus = 503;
+        assertThatThrownBy(() -> paymentApiClient.cancel("ORDER-0001"))
+                .isInstanceOf(PaymentResultUnknownException.class);
+    }
+
+    @Test
     @DisplayName("payment-service가 결과 불명(503)으로 응답하면 결과 불명 예외를 던진다")
     void throwsUnknownWhenPaymentResultUnknown() {
         responseStatus = 503;
