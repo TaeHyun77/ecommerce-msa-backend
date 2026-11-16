@@ -1,5 +1,6 @@
 package com.park.ecommerce.toss;
 
+import com.park.ecommerce.toss.dto.TossCancelRequest;
 import com.park.ecommerce.toss.dto.TossConfirmRequest;
 import com.park.ecommerce.toss.dto.TossErrorResponse;
 import com.park.ecommerce.toss.dto.TossPaymentResponse;
@@ -11,7 +12,7 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.util.function.Supplier;
 
-// 토스페이먼츠 결제 승인, 조회 API 호출
+// 토스페이먼츠 결제 승인, 조회, 취소 API 호출
 @Component
 @RequiredArgsConstructor
 public class TossPaymentsClient {
@@ -35,6 +36,18 @@ public class TossPaymentsClient {
                 .uri("/v1/payments/confirm")
                 .header(IDEMPOTENCY_KEY_HEADER, orderId)
                 .body(new TossConfirmRequest(paymentKey, orderId, amount))
+                .retrieve()
+                .body(TossPaymentResponse.class)
+        );
+    }
+
+    // 결제 전액 취소 요청
+    // 멱등키를 붙여 결과를 모른 채 다시 요청해도 한 번만 취소됨 - 승인의 멱등키(주문번호)와 겹치지 않는 값을 넘겨야 함
+    public TossPaymentResponse cancel(String paymentKey, String cancelReason, String idempotencyKey) {
+        return call(() -> tossPaymentsRestClient.post()
+                .uri("/v1/payments/{paymentKey}/cancel", paymentKey)
+                .header(IDEMPOTENCY_KEY_HEADER, idempotencyKey)
+                .body(new TossCancelRequest(cancelReason))
                 .retrieve()
                 .body(TossPaymentResponse.class)
         );

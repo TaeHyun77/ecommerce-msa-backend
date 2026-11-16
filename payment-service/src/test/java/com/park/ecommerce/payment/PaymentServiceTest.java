@@ -25,6 +25,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,6 +43,7 @@ class PaymentServiceTest {
     private static final String PAYMENT_KEY = "tgen_pay_0001";
     private static final int AMOUNT = 7_800;
     private static final OffsetDateTime APPROVED_AT = OffsetDateTime.of(2026, 9, 22, 12, 0, 5, 0, ZoneOffset.ofHours(9));
+    private static final OffsetDateTime CANCELED_AT = OffsetDateTime.of(2026, 9, 22, 13, 30, 0, 0, ZoneOffset.ofHours(9));
 
     @Container
     @ServiceConnection
@@ -78,7 +80,7 @@ class PaymentServiceTest {
         // 한국 시각 14:38:18(+09:00)과 같은 순간 - Jackson은 OffsetDateTime을 읽을 때 기본으로 UTC로 바꾼다
         OffsetDateTime approvedAtInUtc = OffsetDateTime.of(2026, 9, 22, 5, 38, 18, 0, ZoneOffset.UTC);
         given(tossPaymentsClient.confirm(PAYMENT_KEY, orderNo, AMOUNT))
-                .willReturn(new TossPaymentResponse(PAYMENT_KEY, orderNo, "DONE", "간편결제", AMOUNT, approvedAtInUtc));
+                .willReturn(new TossPaymentResponse(PAYMENT_KEY, orderNo, "DONE", "간편결제", AMOUNT, approvedAtInUtc, null));
 
         paymentService.approve(request(orderNo));
 
@@ -112,6 +114,22 @@ class PaymentServiceTest {
 
         assertThat(response.status()).isEqualTo(PaymentStatus.DONE);
         assertThat(paymentOf(orderNo).getStatus()).isEqualTo(PaymentStatus.DONE);
+    }
+
+    @Test
+    @DisplayName("조회 결과 승인된 결제가 다른 주문의 것이면 실패로 확정한다 - 이미 승인된 결제 키를 다른 주문에 다시 쓰지 못하도록")
+    void failsWhenApprovedPaymentBelongsToAnotherOrder() {
+        String orderNo = newOrderNo();
+        String paidOrderNo = newOrderNo();
+        given(tossPaymentsClient.confirm(PAYMENT_KEY, orderNo, AMOUNT))
+                .willThrow(new TossPaymentsException("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다."));
+        given(tossPaymentsClient.find(PAYMENT_KEY)).willReturn(tossPayment(paidOrderNo, "DONE"));
+
+        PaymentApproveResponse response = paymentService.approve(request(orderNo));
+
+        assertThat(response.status()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(paymentOf(orderNo).getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(paymentOf(orderNo).getFailReason()).contains(paidOrderNo);
     }
 
     @Test
@@ -191,6 +209,97 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("승인 완료된 결제를 취소하면 주문번호와 겹치지 않는 멱등키로 토스에 취소를 요청하고 취소 시각과 함께 취소로 기록한다")
+    void cancelsDonePayment() {
+        String orderNo = newOrderNo();
+        paymentRepository.save(completed(orderNo));
+        given(tossPaymentsClient.cancel(PAYMENT_KEY, "주문 취소", "cancel-" + orderNo)).willReturn(canceledTossPayment(orderNo));
+
+        PaymentResponse response = paymentService.cancel(orderNo);
+
+        assertThat(response.status()).isEqualTo(PaymentStatus.CANCELED);
+        assertThat(response.canceledAt()).isEqualTo(inServerTimeZone(CANCELED_AT));
+        assertThat(paymentOf(orderNo).getStatus()).isEqualTo(PaymentStatus.CANCELED);
+    }
+
+    @Test
+    @DisplayName("이미 취소된 결제를 다시 취소하면 토스를 다시 호출하지 않고 같은 결과를 응답한다")
+    void returnsCanceledResultWithoutCallingToss() {
+        String orderNo = newOrderNo();
+        Payment payment = completed(orderNo);
+        payment.cancel(CANCELED_AT.toLocalDateTime());
+        paymentRepository.save(payment);
+
+        PaymentResponse response = paymentService.cancel(orderNo);
+
+        assertThat(response.status()).isEqualTo(PaymentStatus.CANCELED);
+        verify(tossPaymentsClient, never()).cancel(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("승인이 완료되지 않은 결제는 취소를 거절한다 - 환불할 금액이 없음")
+    void rejectsCancelingPaymentNotDone() {
+        String orderNo = newOrderNo();
+        paymentRepository.save(request(orderNo).toEntity());
+
+        assertThatThrownBy(() -> paymentService.cancel(orderNo))
+                .isInstanceOf(PaymentException.class)
+                .extracting("errorCode")
+                .isEqualTo(PaymentErrorCode.PAYMENT_NOT_CANCELABLE);
+        verify(tossPaymentsClient, never()).cancel(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("취소 응답을 받지 못하면 결과 불명으로 알리고 승인 완료로 남긴다 - 다시 요청하면 취소를 다시 시도")
+    void staysDoneWhenCancelHasNoResponse() {
+        String orderNo = newOrderNo();
+        paymentRepository.save(completed(orderNo));
+        given(tossPaymentsClient.cancel(PAYMENT_KEY, "주문 취소", "cancel-" + orderNo))
+                .willThrow(TossPaymentsException.noResponse("토스페이먼츠 호출 실패: Read timed out"))
+                .willReturn(canceledTossPayment(orderNo));
+
+        assertCancelResultUnknown(orderNo);
+
+        assertThat(paymentService.cancel(orderNo).status()).isEqualTo(PaymentStatus.CANCELED);
+    }
+
+    @Test
+    @DisplayName("취소가 오류 응답이어도 조회 결과 이미 취소됐으면 취소로 기록한다")
+    void recordsCancelFoundByInquiry() {
+        String orderNo = newOrderNo();
+        paymentRepository.save(completed(orderNo));
+        given(tossPaymentsClient.cancel(PAYMENT_KEY, "주문 취소", "cancel-" + orderNo))
+                .willThrow(new TossPaymentsException("ALREADY_CANCELED_PAYMENT", "이미 취소된 결제 입니다."));
+        given(tossPaymentsClient.find(PAYMENT_KEY)).willReturn(canceledTossPayment(orderNo));
+
+        PaymentResponse response = paymentService.cancel(orderNo);
+
+        assertThat(response.status()).isEqualTo(PaymentStatus.CANCELED);
+        assertThat(paymentOf(orderNo).getCanceledAt()).isEqualTo(inServerTimeZone(CANCELED_AT));
+    }
+
+    @Test
+    @DisplayName("취소가 오류 응답이고 조회 결과 아직 승인 완료면 결과 불명으로 알리고 승인 완료로 남긴다")
+    void staysDoneWhenCancelFailsAndStillDone() {
+        String orderNo = newOrderNo();
+        paymentRepository.save(completed(orderNo));
+        given(tossPaymentsClient.cancel(PAYMENT_KEY, "주문 취소", "cancel-" + orderNo))
+                .willThrow(new TossPaymentsException("FAILED_INTERNAL_SYSTEM_PROCESSING", "내부 시스템 처리 작업이 실패했습니다."));
+        given(tossPaymentsClient.find(PAYMENT_KEY)).willReturn(tossPayment(orderNo, "DONE"));
+
+        assertCancelResultUnknown(orderNo);
+    }
+
+    @Test
+    @DisplayName("결제 기록이 없는 주문을 취소하면 404 예외를 던진다")
+    void rejectsCancelingUnknownOrder() {
+        assertThatThrownBy(() -> paymentService.cancel(newOrderNo()))
+                .isInstanceOf(PaymentException.class)
+                .extracting("errorCode")
+                .isEqualTo(PaymentErrorCode.PAYMENT_NOT_FOUND);
+    }
+
+    @Test
     @DisplayName("결제 정보를 조회하면 상태·금액·결제 수단·승인 시각을 돌려준다")
     void findsPayment() {
         String orderNo = newOrderNo();
@@ -223,6 +332,15 @@ class PaymentServiceTest {
         assertThat(paymentOf(orderNo).getStatus()).isEqualTo(PaymentStatus.REQUESTED);
     }
 
+    private void assertCancelResultUnknown(String orderNo) {
+        assertThatThrownBy(() -> paymentService.cancel(orderNo))
+                .isInstanceOf(PaymentException.class)
+                .extracting("errorCode")
+                .isEqualTo(PaymentErrorCode.PAYMENT_RESULT_UNKNOWN);
+
+        assertThat(paymentOf(orderNo).getStatus()).isEqualTo(PaymentStatus.DONE);
+    }
+
     private static LocalDateTime inServerTimeZone(OffsetDateTime dateTime) {
         return LocalDateTime.ofInstant(dateTime.toInstant(), ZoneId.systemDefault());
     }
@@ -244,7 +362,12 @@ class PaymentServiceTest {
     private static TossPaymentResponse tossPayment(String orderNo, String status) {
         OffsetDateTime approvedAt = "DONE".equals(status) ? APPROVED_AT : null;
         String method = "DONE".equals(status) ? "카드" : null;
-        return new TossPaymentResponse(PAYMENT_KEY, orderNo, status, method, AMOUNT, approvedAt);
+        return new TossPaymentResponse(PAYMENT_KEY, orderNo, status, method, AMOUNT, approvedAt, null);
+    }
+
+    private static TossPaymentResponse canceledTossPayment(String orderNo) {
+        return new TossPaymentResponse(PAYMENT_KEY, orderNo, "CANCELED", "카드", AMOUNT, APPROVED_AT,
+                List.of(new TossPaymentResponse.Cancel(CANCELED_AT)));
     }
 
     private static String newOrderNo() {

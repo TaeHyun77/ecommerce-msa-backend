@@ -54,6 +54,27 @@ class PaymentTest {
         assertThatIllegalStateException().isThrownBy(() -> payment.fail("뒤늦은 실패"));
     }
 
+    @Test
+    @DisplayName("승인 완료된 결제를 취소하면 취소 시각을 기록한다")
+    void cancels() {
+        Payment payment = payment();
+        payment.approve("카드", APPROVED_AT);
+
+        payment.cancel(APPROVED_AT.plusHours(1));
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.CANCELED);
+        assertThat(payment.getCanceledAt()).isEqualTo(APPROVED_AT.plusHours(1));
+        assertThat(payment.isCanceled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("승인 완료되지 않은 결제는 취소할 수 없다")
+    void rejectsCancelingBeforeApproval() {
+        Payment payment = payment();
+
+        assertThatIllegalStateException().isThrownBy(() -> payment.cancel(APPROVED_AT));
+    }
+
     private static Payment payment() {
         return Payment.builder()
                 .orderNo("ORDER-0001")

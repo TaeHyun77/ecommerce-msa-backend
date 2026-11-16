@@ -1,5 +1,6 @@
 package com.park.ecommerce.order;
 
+import com.park.ecommerce.order.dto.OrderCancelResponse;
 import com.park.ecommerce.order.dto.OrderCreateRequest;
 import com.park.ecommerce.order.dto.OrderCreateResponse;
 import com.park.ecommerce.order.domain.OrderStatus;
@@ -31,6 +32,7 @@ public class OrderController {
     private final OrderPlacementService orderPlacementService;
     private final OrderService orderService;
     private final OrderPaymentService orderPaymentService;
+    private final OrderCancelService orderCancelService;
 
     // 주문 목록 조회 - 요약 정보
     @GetMapping
@@ -67,6 +69,18 @@ public class OrderController {
     ) {
         OrderPaymentResponse response = orderPaymentService.approvePayment(memberId, orderNo, request);
         HttpStatus status = response.status() == OrderStatus.PAID ? HttpStatus.OK : HttpStatus.ACCEPTED;
+        return ResponseEntity.status(status).body(response);
+    }
+
+    // 결제 완료 주문 취소 - 전액 환불
+    // 취소가 끝나면 200, 결과를 아직 모르면 202 - 202를 받으면 주문 조회로 최종 결과를 확인한다
+    @PostMapping("/{orderNo}/cancel")
+    public ResponseEntity<OrderCancelResponse> cancelOrder(
+            @RequestHeader(MEMBER_ID_HEADER) Long memberId,
+            @PathVariable String orderNo
+    ) {
+        OrderCancelResponse response = orderCancelService.cancelOrder(memberId, orderNo);
+        HttpStatus status = response.status() == OrderStatus.CANCELLED ? HttpStatus.OK : HttpStatus.ACCEPTED;
         return ResponseEntity.status(status).body(response);
     }
 }

@@ -41,14 +41,44 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("update Order o set o.status = FAILED, o.nextRetryAt = null where o.orderNo = :orderNo and o.status = APPROVING")
     int failApproving(String orderNo);
 
+    // 승인 시작이 fastUntil 이후면 다음 주기에 바로, 그보다 오래됐으면 slowNext에 다시 처리되도록 다음 시도 시각을 적음
     @Modifying
-    @Query("update Order o set o.nextRetryAt = :now where o.orderNo = :orderNo and o.status = APPROVING")
-    int markApprovalUnknown(String orderNo, LocalDateTime now);
+    @Query("""
+            update Order o
+            set o.nextRetryAt = case when o.approvalRequestedAt > :fastUntil then :now else :slowNext end
+            where o.orderNo = :orderNo and o.status = APPROVING
+            """)
+    int markApprovalUnknown(String orderNo, LocalDateTime now, LocalDateTime fastUntil, LocalDateTime slowNext);
 
     // 재시도 상한을 넘긴 주문만 다음 시도 시각을 비움 - 비운 주문은 복구 대상에서 빠지므로 건당 한 번만 반영됨
     @Modifying
     @Query("update Order o set o.nextRetryAt = null where o.orderNo = :orderNo and o.status = APPROVING and o.approvalRequestedAt <= :giveUpBefore")
     int giveUpApproval(String orderNo, LocalDateTime giveUpBefore);
+
+    // 결제 완료 주문만 취소 중으로 바꿈 - 같은 주문의 취소 요청이 동시에 와도 한쪽만 반영됨
+    @Modifying
+    @Query("update Order o set o.status = CANCELLING, o.cancelRequestedAt = :now, o.nextRetryAt = :nextRetryAt where o.orderNo = :orderNo and o.status = PAID")
+    int startCancel(String orderNo, LocalDateTime now, LocalDateTime nextRetryAt);
+
+    @Modifying
+    @Query("update Order o set o.status = CANCELLED, o.nextRetryAt = null where o.orderNo = :orderNo and o.status = CANCELLING")
+    int markCancelled(String orderNo);
+
+    // 승인의 markApprovalUnknown과 같은 규칙 - 기준 시각만 취소 시작 시각
+    @Modifying
+    @Query("""
+            update Order o
+            set o.nextRetryAt = case when o.cancelRequestedAt > :fastUntil then :now else :slowNext end
+            where o.orderNo = :orderNo and o.status = CANCELLING
+            """)
+    int markCancelUnknown(String orderNo, LocalDateTime now, LocalDateTime fastUntil, LocalDateTime slowNext);
+
+    @Modifying
+    @Query("update Order o set o.nextRetryAt = null where o.orderNo = :orderNo and o.status = CANCELLING and o.cancelRequestedAt <= :giveUpBefore")
+    int giveUpCancel(String orderNo, LocalDateTime giveUpBefore);
+
+    @Query("select o.orderNo from Order o where o.status = CANCELLING and o.nextRetryAt <= :now order by o.nextRetryAt")
+    List<String> findRecoverableCancellingOrderNos(LocalDateTime now, Pageable pageable);
 
     // 복구 대상 - 다음 시도 시각이 지난 승인 중 주문
     // 다시 처리해도 결과를 모르는 주문은 시각이 뒤로 가므로, 오래 기다린 주문부터 돌아가며 처리됨

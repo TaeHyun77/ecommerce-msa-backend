@@ -3,6 +3,7 @@ package com.park.ecommerce.order;
 import com.park.ecommerce.exception.OrderErrorCode;
 import com.park.ecommerce.exception.OrderException;
 import com.park.ecommerce.order.domain.OrderStatus;
+import com.park.ecommerce.order.dto.OrderCancelResponse;
 import com.park.ecommerce.order.dto.OrderCreateRequest;
 import com.park.ecommerce.order.dto.OrderCreateResponse;
 import com.park.ecommerce.order.dto.OrderDetailResponse;
@@ -43,6 +44,9 @@ class OrderControllerTest {
 
     @MockitoBean
     private OrderPaymentService orderPaymentService;
+
+    @MockitoBean
+    private OrderCancelService orderCancelService;
 
     // 메인 클래스의 @EnableJpaAuditing이 웹 슬라이스 테스트에서도 JPA 메타모델을 요구하므로 대체
     @MockitoBean
@@ -201,6 +205,30 @@ class OrderControllerTest {
                         .content(paymentRequest("tgen_pay_0001")))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("APPROVING"));
+    }
+
+    @Test
+    @DisplayName("주문 취소가 끝나면 200, 결과를 아직 모르면 202와 취소 중 상태를 응답한다")
+    void respondsCancelResult() throws Exception {
+        given(orderCancelService.cancelOrder(1L, "ORDER-0001")).willReturn(new OrderCancelResponse("ORDER-0001", OrderStatus.CANCELLED));
+        given(orderCancelService.cancelOrder(1L, "ORDER-0002")).willReturn(new OrderCancelResponse("ORDER-0002", OrderStatus.CANCELLING));
+
+        mockMvc.perform(post("/api/orders/ORDER-0001/cancel").header(MEMBER_ID_HEADER, 1L))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+        mockMvc.perform(post("/api/orders/ORDER-0002/cancel").header(MEMBER_ID_HEADER, 1L))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("CANCELLING"));
+    }
+
+    @Test
+    @DisplayName("결제가 완료되지 않은 주문의 취소는 409와 취소 불가 코드를 응답한다")
+    void respondsConflictWhenNotCancelable() throws Exception {
+        given(orderCancelService.cancelOrder(1L, "ORDER-0001")).willThrow(new OrderException(OrderErrorCode.ORDER_NOT_CANCELABLE));
+
+        mockMvc.perform(post("/api/orders/ORDER-0001/cancel").header(MEMBER_ID_HEADER, 1L))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ORDER_NOT_CANCELABLE"));
     }
 
     @Test

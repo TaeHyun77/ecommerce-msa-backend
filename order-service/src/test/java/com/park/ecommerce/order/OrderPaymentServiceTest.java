@@ -56,7 +56,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 @SpringBootTest(properties = {
         "order.payment-waiting.ttl=10m",
         "order.approval-recovery.stale-after=2m",
-        "order.approval-recovery.give-up-after=15m",
+        "order.approval-recovery.fast-retry-window=15m",
+        "order.approval-recovery.slow-retry-interval=5m",
+        "order.approval-recovery.give-up-after=24h",
         // 테스트 중 스케줄러 개입 방지 - 복구 스케줄러는 테스트에서 직접 호출
         "order.payment-waiting.expire-poll-delay=1h",
         "order.approval-recovery.poll-delay=1h"
@@ -505,10 +507,27 @@ class OrderPaymentServiceTest {
     }
 
     @Test
+    @DisplayName("빠른 재시도 구간이 지난 주문은 결과를 모르면 다음 시도 시각을 5분 뒤로 적어 그동안 복구 대상에서 뺀다")
+    void retriesSlowlyAfterFastRetryWindow() {
+        String orderNo = unknownMarkedOrder(LocalDateTime.now().minusMinutes(16));
+        given(productApiClient.confirmReservation(orderNo)).willReturn(true);
+        given(paymentApiClient.approve(any())).willThrow(new PaymentResultUnknownException("payment-service 응답 status=503"));
+
+        orderApprovalRecoveryScheduler.recoverApprovals();
+        orderApprovalRecoveryScheduler.recoverApprovals();
+
+        assertThat(statusOf(orderNo)).isEqualTo(OrderStatus.APPROVING);
+        assertThat(nextRetryAtOf(orderNo))
+                .isAfter(LocalDateTime.now().plusMinutes(4))
+                .isBeforeOrEqualTo(LocalDateTime.now().plusMinutes(5));
+        verify(productApiClient, times(1)).confirmReservation(orderNo);
+    }
+
+    @Test
     @DisplayName("재시도 상한이 지난 주문도 한 번은 다시 처리한다 - 서버가 오래 멈췄다 켜져도 이미 결제된 주문을 놓치지 않도록")
     void retriesOnceEvenAfterGiveUpAfter() {
         String orderNo = paymentWaitingOrder();
-        changeStatus(orderNo, "APPROVING", LocalDateTime.now().minusMinutes(16));
+        changeStatus(orderNo, "APPROVING", LocalDateTime.now().minusHours(25));
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
         given(paymentApiClient.approve(any())).willReturn(done(orderNo));
 
@@ -520,7 +539,7 @@ class OrderPaymentServiceTest {
     @Test
     @DisplayName("재시도 상한이 지난 주문을 다시 처리해도 결과를 모르면 다음 시도 시각을 비워 재시도를 멈춘다 - 수동 확인 대상")
     void givesUpWhenStillUnknownAfterGiveUpAfter() {
-        String orderNo = unknownMarkedOrder(LocalDateTime.now().minusMinutes(16));
+        String orderNo = unknownMarkedOrder(LocalDateTime.now().minusHours(25));
         given(productApiClient.confirmReservation(orderNo)).willReturn(true);
         given(paymentApiClient.approve(any())).willThrow(new PaymentResultUnknownException("payment-service 응답 status=503"));
 

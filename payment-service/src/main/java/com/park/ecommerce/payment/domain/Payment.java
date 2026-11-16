@@ -40,6 +40,8 @@ public class Payment extends BaseTimeEntity {
     @Column(length = 500)
     private String failReason; // 승인 실패 전에는 null
 
+    private LocalDateTime canceledAt; // 취소 전에는 null
+
     @Builder
     private Payment(String orderNo, String paymentKey, Integer amount) {
         this.orderNo = orderNo;
@@ -63,6 +65,19 @@ public class Payment extends BaseTimeEntity {
         validateNotCompleted();
         this.status = PaymentStatus.FAILED;
         this.failReason = reason;
+    }
+
+    public boolean isCanceled() {
+        return status == PaymentStatus.CANCELED;
+    }
+
+    // 환불할 금액이 있는 승인 완료 결제만 취소할 수 있음
+    public void cancel(LocalDateTime canceledAt) {
+        if (status != PaymentStatus.DONE) {
+            throw new IllegalStateException("승인 완료된 결제만 취소할 수 있습니다. orderNo=" + orderNo);
+        }
+        this.status = PaymentStatus.CANCELED;
+        this.canceledAt = canceledAt;
     }
 
     // 토스에서 확정된 결과는 바뀌지 않으므로, 이미 확정된 결제를 다시 바꾸려는 것은 처리 흐름의 오류로 판단

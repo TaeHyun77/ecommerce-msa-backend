@@ -4,6 +4,7 @@ import com.park.ecommerce.exception.PaymentErrorCode;
 import com.park.ecommerce.exception.PaymentException;
 import com.park.ecommerce.payment.domain.Payment;
 import com.park.ecommerce.payment.domain.PaymentRepository;
+import com.park.ecommerce.payment.domain.PaymentStatus;
 import com.park.ecommerce.payment.dto.PaymentApproveRequest;
 import com.park.ecommerce.payment.dto.PaymentApproveResponse;
 import com.park.ecommerce.payment.dto.PaymentResponse;
@@ -24,6 +25,8 @@ import java.time.ZoneId;
 @RequiredArgsConstructor
 public class PaymentService {
     private static final String NOT_FOUND_PAYMENT = "NOT_FOUND_PAYMENT"; // 토스 결제 조회 - 존재하지 않는 결제
+    private static final String CANCEL_REASON = "주문 취소";
+    private static final String CANCEL_IDEMPOTENCY_KEY_PREFIX = "cancel-"; // 승인의 멱등키(주문번호)와 구분
 
     private final PaymentRepository paymentRepository;
     private final TossPaymentsClient tossPaymentsClient;
@@ -59,6 +62,46 @@ public class PaymentService {
         return PaymentApproveResponse.from(payment);
     }
 
+    // 결제 전액 취소 - 결과를 모르는 order-service가 같은 요청을 다시 보내도 한 번만 환불되도록 멱등하게 동작
+    public PaymentResponse cancel(String orderNo) {
+        Payment payment = paymentRepository.findByOrderNo(orderNo)
+                .orElseThrow(() -> new PaymentException(PaymentErrorCode.PAYMENT_NOT_FOUND));
+
+        if (payment.isCanceled()) return PaymentResponse.from(payment);
+        if (payment.getStatus() != PaymentStatus.DONE) {
+            throw new PaymentException(PaymentErrorCode.PAYMENT_NOT_CANCELABLE);
+        }
+
+        applyCanceled(payment, requestCancel(payment));
+
+        paymentRepository.save(payment);
+        log.debug("[결제] 취소 완료 orderNo={}", orderNo);
+        return PaymentResponse.from(payment);
+    }
+
+    // 취소 요청이 오류 응답이면 결제를 조회해 이미 취소됐는지 확인 - 승인과 같이 오류 코드로 판단하지 않음
+    private TossPaymentResponse requestCancel(Payment payment) {
+        try {
+            return tossPaymentsClient.cancel(payment.getPaymentKey(), CANCEL_REASON, CANCEL_IDEMPOTENCY_KEY_PREFIX + payment.getOrderNo());
+        } catch (TossPaymentsException cancelError) {
+            if (cancelError.isNoResponse()) throw resultUnknown(payment, "취소 응답 없음: " + cancelError.getMessage());
+
+            try {
+                return tossPaymentsClient.find(payment.getPaymentKey());
+            } catch (TossPaymentsException e) {
+                throw resultUnknown(payment, "취소 실패(" + describe(cancelError) + ") 후 결제 조회도 실패: " + e.getMessage());
+            }
+        }
+    }
+
+    // 취소가 확인된 경우에만 기록하고, 그 외에는 환불 여부를 알 수 없으므로 결과 불명으로 남겨 다시 요청받음
+    private void applyCanceled(Payment payment, TossPaymentResponse tossPayment) {
+        if (!"CANCELED".equals(tossPayment.status())) {
+            throw resultUnknown(payment, "취소 요청 후 결제 상태 " + tossPayment.status());
+        }
+        payment.cancel(inServerTimeZone(tossPayment.canceledAt()));
+    }
+
     // 승인 실패 시 토스에 결제 상태를 재조회하고, 이때도 결과를 확인할 수 없으면 UNKNOWN 반환
     private void resolveByInquiry(Payment payment, TossPaymentsException confirmError) {
         TossPaymentResponse found;
@@ -77,10 +120,21 @@ public class PaymentService {
 
     private void applyTossStatus(Payment payment, TossPaymentResponse tossPayment, TossPaymentsException confirmError) {
         switch (tossPayment.status()) {
-            case "DONE" -> payment.approve(tossPayment.method(), inServerTimeZone(tossPayment.approvedAt()));
+            case "DONE" -> applyDone(payment, tossPayment);
             case "ABORTED", "EXPIRED" -> payment.fail(failReason(tossPayment, confirmError)); // 승인 실패 or 만료
             default -> throw resultUnknown(payment, "결제 상태 " + tossPayment.status()); // 결과 모름
         }
+    }
+
+    // 승인된 결제가 이 주문의 것인지 확인한 뒤 완료로 기록
+    // 결제 조회는 결제 키만으로 응답하므로, 이미 승인된 다른 주문의 결제 키를 넣어 결제 없이 완료 처리되는 것을 막음
+    private void applyDone(Payment payment, TossPaymentResponse tossPayment) {
+        if (!payment.getOrderNo().equals(tossPayment.orderId())) {
+            payment.fail("다른 주문의 결제 키 orderId=" + tossPayment.orderId());
+            return;
+        }
+
+        payment.approve(tossPayment.method(), inServerTimeZone(tossPayment.approvedAt()));
     }
 
     // UTC로 변환된 시간을 서버 시간대 (+09:00)로 변환하여 저장 ( toLocalDateTime() 사용 시 9시간 차이 발생 )
@@ -97,7 +151,7 @@ public class PaymentService {
     }
 
     private static PaymentException resultUnknown(Payment payment, String reason) {
-        log.warn("[결제] 승인 결과 불명 orderNo={}, 사유={}", payment.getOrderNo(), reason);
+        log.warn("[결제] 결과 불명 orderNo={}, 사유={}", payment.getOrderNo(), reason);
         return new PaymentException(PaymentErrorCode.PAYMENT_RESULT_UNKNOWN);
     }
 }

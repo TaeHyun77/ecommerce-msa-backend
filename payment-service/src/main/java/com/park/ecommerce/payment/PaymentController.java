@@ -24,6 +24,12 @@ public class PaymentController {
         return paymentService.approve(request);
     }
 
+    // order-service가 보낸 결제 취소 요청 - 전액 환불
+    @PostMapping("/{orderNo}/cancel")
+    public PaymentResponse cancel(@PathVariable String orderNo) {
+        return paymentService.cancel(orderNo);
+    }
+
     // order-service가 주문 상세에 보여줄 결제 정보 조회
     @GetMapping("/{orderNo}")
     public PaymentResponse getPayment(@PathVariable String orderNo) {

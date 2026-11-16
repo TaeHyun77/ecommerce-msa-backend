@@ -34,6 +34,19 @@ public class PaymentApiClient {
         }
     }
 
+    // 결제 전액 취소 - 취소가 확정되면 정상 반환, 결과를 모르면 PaymentResultUnknownException을 던짐
+    // 취소 요청은 멱등적이므로 중복 요청해도 한 번만 환불됨
+    public void cancel(String orderNo) {
+        try {
+            paymentServiceRestClient.post()
+                    .uri("/internal/payments/{orderNo}/cancel", orderNo)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (ResourceAccessException e) {
+            throw new PaymentServiceUnavailableException("payment-service 호출 실패: " + e.getMessage());
+        }
+    }
+
     // 결제 정보 조회
     public Optional<PaymentResponse> findPayment(String orderNo) {
         try {
