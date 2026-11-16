@@ -77,10 +77,21 @@ public class PaymentService {
 
     private void applyTossStatus(Payment payment, TossPaymentResponse tossPayment, TossPaymentsException confirmError) {
         switch (tossPayment.status()) {
-            case "DONE" -> payment.approve(tossPayment.method(), inServerTimeZone(tossPayment.approvedAt()));
+            case "DONE" -> applyDone(payment, tossPayment);
             case "ABORTED", "EXPIRED" -> payment.fail(failReason(tossPayment, confirmError)); // 승인 실패 or 만료
             default -> throw resultUnknown(payment, "결제 상태 " + tossPayment.status()); // 결과 모름
         }
+    }
+
+    // 승인된 결제가 이 주문의 것인지 확인한 뒤 완료로 기록
+    // 결제 조회는 결제 키만으로 응답하므로, 이미 승인된 다른 주문의 결제 키를 넣어 결제 없이 완료 처리되는 것을 막음
+    private void applyDone(Payment payment, TossPaymentResponse tossPayment) {
+        if (!payment.getOrderNo().equals(tossPayment.orderId())) {
+            payment.fail("다른 주문의 결제 키 orderId=" + tossPayment.orderId());
+            return;
+        }
+
+        payment.approve(tossPayment.method(), inServerTimeZone(tossPayment.approvedAt()));
     }
 
     // UTC로 변환된 시간을 서버 시간대 (+09:00)로 변환하여 저장 ( toLocalDateTime() 사용 시 9시간 차이 발생 )

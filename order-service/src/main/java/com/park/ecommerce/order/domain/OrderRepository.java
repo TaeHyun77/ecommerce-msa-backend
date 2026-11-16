@@ -41,9 +41,14 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("update Order o set o.status = FAILED, o.nextRetryAt = null where o.orderNo = :orderNo and o.status = APPROVING")
     int failApproving(String orderNo);
 
+    // 승인 시작이 fastUntil 이후면 다음 주기에 바로, 그보다 오래됐으면 slowNext에 다시 처리되도록 다음 시도 시각을 적음
     @Modifying
-    @Query("update Order o set o.nextRetryAt = :now where o.orderNo = :orderNo and o.status = APPROVING")
-    int markApprovalUnknown(String orderNo, LocalDateTime now);
+    @Query("""
+            update Order o
+            set o.nextRetryAt = case when o.approvalRequestedAt > :fastUntil then :now else :slowNext end
+            where o.orderNo = :orderNo and o.status = APPROVING
+            """)
+    int markApprovalUnknown(String orderNo, LocalDateTime now, LocalDateTime fastUntil, LocalDateTime slowNext);
 
     // 재시도 상한을 넘긴 주문만 다음 시도 시각을 비움 - 비운 주문은 복구 대상에서 빠지므로 건당 한 번만 반영됨
     @Modifying

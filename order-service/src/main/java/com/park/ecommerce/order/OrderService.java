@@ -22,15 +22,21 @@ import java.util.List;
 public class OrderService {
     private final OrderRepository orderRepository;
     private final Duration staleAfter;
+    private final Duration fastRetryWindow;
+    private final Duration slowRetryInterval;
     private final Duration giveUpAfter;
 
     public OrderService(
             OrderRepository orderRepository,
             @Value("${order.approval-recovery.stale-after}") Duration staleAfter,
+            @Value("${order.approval-recovery.fast-retry-window}") Duration fastRetryWindow,
+            @Value("${order.approval-recovery.slow-retry-interval}") Duration slowRetryInterval,
             @Value("${order.approval-recovery.give-up-after}") Duration giveUpAfter
     ) {
         this.orderRepository = orderRepository;
         this.staleAfter = staleAfter;
+        this.fastRetryWindow = fastRetryWindow;
+        this.slowRetryInterval = slowRetryInterval;
         this.giveUpAfter = giveUpAfter;
     }
 
@@ -64,7 +70,8 @@ public class OrderService {
         return orderRepository.startApproval(orderNo, paymentKey, now, now.plus(staleAfter)) == 1;
     }
 
-    // 승인 처리가 결과를 모른 채 끝났을 때 호출 - 다음 시도 시각을 지금으로 당겨 다음 주기에 바로 다시 처리되도록 함
+    // 승인 처리가 결과를 모른 채 끝났을 때 호출 - 빠른 재시도 구간 안이면 다음 시도 시각을 지금으로 당겨 다음 주기에 바로 다시 처리되도록 함
+    // 구간이 지난 주문은 토스나 네트워크 장애로 닿지 못한 건이라, 간격을 넓혀 새로 들어온 주문의 복구를 밀어내지 않도록 함
     // 재시도 상한을 넘긴 주문은 이미 승인됐을 수 있어 자동으로 실패 처리하지 않고, 재시도만 멈춘 뒤 토스에서 결제 상태를 확인해 수동으로 처리하도록 알림
     // 상한을 시도 뒤에 판단하므로, 서버가 오래 멈췄다 켜져 상한을 넘긴 주문도 한 번은 다시 처리됨
     @Transactional
@@ -75,7 +82,7 @@ public class OrderService {
             log.error("[결제 복구] 재시도 상한 초과, 수동 확인 필요 orderNo={}", orderNo);
             return;
         }
-        orderRepository.markApprovalUnknown(orderNo, now);
+        orderRepository.markApprovalUnknown(orderNo, now, now.minus(fastRetryWindow), now.plus(slowRetryInterval));
     }
 
     @Transactional

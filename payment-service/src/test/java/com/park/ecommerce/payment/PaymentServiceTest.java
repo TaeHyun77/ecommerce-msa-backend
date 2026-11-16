@@ -115,6 +115,22 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("조회 결과 승인된 결제가 다른 주문의 것이면 실패로 확정한다 - 이미 승인된 결제 키를 다른 주문에 다시 쓰지 못하도록")
+    void failsWhenApprovedPaymentBelongsToAnotherOrder() {
+        String orderNo = newOrderNo();
+        String paidOrderNo = newOrderNo();
+        given(tossPaymentsClient.confirm(PAYMENT_KEY, orderNo, AMOUNT))
+                .willThrow(new TossPaymentsException("ALREADY_PROCESSED_PAYMENT", "이미 처리된 결제 입니다."));
+        given(tossPaymentsClient.find(PAYMENT_KEY)).willReturn(tossPayment(paidOrderNo, "DONE"));
+
+        PaymentApproveResponse response = paymentService.approve(request(orderNo));
+
+        assertThat(response.status()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(paymentOf(orderNo).getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(paymentOf(orderNo).getFailReason()).contains(paidOrderNo);
+    }
+
+    @Test
     @DisplayName("승인 응답을 받지 못하면 결제를 조회하지 않고 결과 불명으로 남긴다 - 최대 처리 시간이 승인 타임아웃을 넘지 않도록")
     void leavesRequestedWithoutInquiryWhenNoResponse() {
         String orderNo = newOrderNo();
